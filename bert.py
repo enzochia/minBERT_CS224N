@@ -113,8 +113,8 @@ class BertLayer(nn.Module):
     """
     # Hint: Remember that BERT applies dropout to the transformed output of each sub-layer,
     # before it is added to the sub-layer input and normalized with a layer norm.
-    output = dropout(output)
-    output = input + ln_layer(dense_layer(output))
+    output = dropout(dense_layer(output))
+    output = ln_layer(input + output)
     # ### TODO
     # raise NotImplementedError
     return(output)
