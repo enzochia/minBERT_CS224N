@@ -99,8 +99,11 @@ class BertLayer(nn.Module):
     """
     # Hint: Remember that BERT applies dropout to the transformed output of each sub-layer,
     # before it is added to the sub-layer input and normalized with a layer norm.
-    ### TODO
-    raise NotImplementedError
+    output = dropout(output)
+    output = input + ln_layer(dense_layer(output))
+    # ### TODO
+    # raise NotImplementedError
+    return(output)
 
 
   def forward(self, hidden_states, attention_mask):
@@ -113,9 +116,16 @@ class BertLayer(nn.Module):
     3. A feed forward layer.
     4. An add-norm operation that takes the input and output of the feed forward layer.
     """
-    ### TODO
-    raise NotImplementedError
-
+    attn_value = self.self_attention(hidden_states, attention_mask)
+    attn_value = self.add_norm(hidden_states, attn_value, self.attention_dense,
+                               self.attention_dropout, self.attention_layer_norm)
+    output = self.interm_dense(attn_value)
+    output = self.interm_af(output)
+    output = self.add_norm(attn_value, output, self.out_dense,
+                           self.out_dropout, self.out_layer_norm)
+    # ### TODO
+    # raise NotImplementedError
+    return(output)
 
 
 class BertModel(BertPreTrainedModel):
