@@ -1,3 +1,4 @@
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -154,16 +155,16 @@ class BertModel(BertPreTrainedModel):
     seq_length = input_shape[1]
 
     # Get word embedding from self.word_embedding into input_embeds.
-    inputs_embeds = None
-    ### TODO
-    raise NotImplementedError
+    inputs_embeds = self.word_embedding(input_ids)
+    # ### TODO
+    # raise NotImplementedError
 
 
     # Use pos_ids to get position embedding from self.pos_embedding into pos_embeds.
     pos_ids = self.position_ids[:, :seq_length]
-    pos_embeds = None
-    ### TODO
-    raise NotImplementedError
+    pos_embeds = self.pos_embedding(pos_ids)
+    # ### TODO
+    # raise NotImplementedError
 
 
     # Get token type ids. Since we are not considering token type, this embedding is
@@ -172,9 +173,12 @@ class BertModel(BertPreTrainedModel):
     tk_type_embeds = self.tk_type_embedding(tk_type_ids)
 
     # Add three embeddings together; then apply embed_layer_norm and dropout and return.
-    ### TODO
-    raise NotImplementedError
-
+    embed = inputs_embeds + pos_embeds + tk_type_embeds
+    embed = self.embed_layer_norm(embed)
+    embed = self.embed_dropout(embed)
+    # ### TODO
+    # raise NotImplementedError
+    return(embed)
 
   def encode(self, hidden_states, attention_mask):
     """
