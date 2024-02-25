@@ -50,8 +50,22 @@ class BertSelfAttention(nn.Module):
     # - Before returning, concatenate multi-heads to recover the original shape:
     #   [bs, seq_len, num_attention_heads * attention_head_size = hidden_size].
 
-    ### TODO
-    raise NotImplementedError
+    bs, num_heads, seq_len, head_size = query.size()
+    # (bs, num_heads, seq_len, head_size) x (bs, num_heads, head_size, seq_len) ->
+    # (bs, num_heads, seq_len, seq_len)
+    att = torch.matmul(query, key.transpose(-2, -1)) * (1.0 / math.sqrt(head_size))
+    # pay attention here, this may be implemented wrong
+    # https://huggingface.co/docs/transformers/glossary#attention-mask
+    att = att.masked_fill(attention_mask[:bs, :, :, :seq_len] < 0, -10000)
+    att = F.softmax(att, dim=-1)
+    att = self.dropout(att)
+    # (bs, num_heads, seq_len, seq_len) x (bs, num_heads, seq_len, head_size)
+    # -> (bs, num_heads, seq_len, head_size)
+    y = torch.matmul(att, value)
+    y = y.transpose(1, 2).contiguous().view(bs, seq_len, num_heads * head_size)
+    # ### TODO
+    # raise NotImplementedError
+    return (y)
 
 
   def forward(self, hidden_states, attention_mask):
