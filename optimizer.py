@@ -27,6 +27,12 @@ class AdamW(Optimizer):
         super().__init__(params, defaults)
 
     def step(self, closure: Callable = None):
+        device = torch.device('cpu')
+        self.device = 'cpu'
+        if torch.cuda.is_available():
+            device = torch.device('cuda')
+        elif torch.backends.mps.is_available():
+            device = torch.device('mps')
         loss = None
         if closure is not None:
             loss = closure()
@@ -64,12 +70,15 @@ class AdamW(Optimizer):
                              'betas': [group["betas"][0], group["betas"][1]],
                              'm_t': torch.zeros(grad.size()),
                              'v_t': torch.zeros(grad.size())}
-
                 betas = group["betas"]
                 eps = group["eps"]
                 weight_decay = group["weight_decay"]
-                m_t = betas[0] * state['m_t'] + (1 - betas[0]) * grad
-                v_t = betas[1] * state['v_t'] + (1 - betas[1]) * grad * grad
+                m_t_prev = state['m_t']
+                v_t_prev = state['v_t']
+                m_t_prev = m_t_prev.to(device)
+                v_t_prev = v_t_prev.to(device)
+                m_t = betas[0] * m_t_prev + (1 - betas[0]) * grad
+                v_t = betas[1] * v_t_prev + (1 - betas[1]) * grad * grad
                 alpha_t = alpha * math.sqrt(1 - state['betas'][1]) / (1 - state['betas'][0])
                 p.data -= alpha_t * m_t / (torch.sqrt(v_t) + eps)
                 p.data -= alpha * weight_decay * p.data
