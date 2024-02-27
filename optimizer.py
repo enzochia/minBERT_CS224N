@@ -28,7 +28,6 @@ class AdamW(Optimizer):
 
     def step(self, closure: Callable = None):
         device = torch.device('cpu')
-        self.device = 'cpu'
         if torch.cuda.is_available():
             device = torch.device('cuda')
         elif torch.backends.mps.is_available():
