@@ -238,7 +238,14 @@ def save_model(model, optimizer, args, config, filepath):
 
 
 def train(args):
-    device = torch.device('cuda') if args.use_gpu else torch.device('cpu')
+    # running on mps makes classifier training speed for SST increase from 5.5 ~ 7.5 it/s to ~20 it/s
+    # running on cuda makes classifier training speed for SST increase from 1.X it/s to ~30 it/s
+    device = torch.device('cpu')
+    if torch.cuda.is_available():
+        device = torch.device('cuda')
+    elif torch.backends.mps.is_available():
+        device = torch.device('mps')
+
     # Create the data and its corresponding datasets and dataloader.
     train_data, num_labels = load_data(args.train, 'train')
     dev_data = load_data(args.dev, 'valid')
