@@ -88,9 +88,19 @@ class MultitaskBERT(nn.Module):
 
         # TODO: try using another linear layer on last_hidden_state to produce something
         #  to return
+        # encode_dict = self.bert(input_ids, attention_mask)
+        # pooler_output = encode_dict['pooler_output']
+        # pooler_output = self.dropout(pooler_output)
+
         encode_dict = self.bert(input_ids, attention_mask)
-        pooler_output = encode_dict['pooler_output']
-        pooler_output = self.dropout(pooler_output)
+        seq_hidden = encode_dict['last_hidden_state']
+        seq_hidden = self.dropout(seq_hidden)
+
+        mask_3d = attention_mask[:, :, None]
+        mask_sum = mask_3d.sum(dim=-2)
+        mat_product = seq_hidden * mask_3d
+        pooler_output = mat_product.sum(dim=-2) / mask_sum
+
         # ### TODO
         # raise NotImplementedError
         return(pooler_output)
@@ -121,6 +131,7 @@ class MultitaskBERT(nn.Module):
         '''
 
         # TODO: another layer of attention?
+        # TODO: CNN
         sent_encode_1 = self.forward(input_ids_1, attention_mask_1)
         sent_encode_2 = self.forward(input_ids_2, attention_mask_2)
         proj_1 = self.paraphrase_proj(sent_encode_1)
