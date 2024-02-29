@@ -81,6 +81,14 @@ class MultitaskBERT(nn.Module):
 
     def forward(self, input_ids, attention_mask):
         'Takes a batch of sentences and produces embeddings for them.'
+        """
+        performance:
+                                dev sentiment acc   dev paraphrase acc  dev sts corr
+        return pooler   pretrain            0.384                0.376        -0.041
+                        finetune            0.523                0.388         0.164
+        return mean     pretrain            0.444                0.375         0.261
+        of seq att      finetune            0.514                0.394         0.369
+        """
         # The final BERT embedding is the hidden state of [CLS] token (the first token)
         # Here, you can start by just returning the embeddings straight from BERT.
         # When thinking of improvements, you can later try modifying this
