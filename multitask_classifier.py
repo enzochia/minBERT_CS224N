@@ -71,9 +71,13 @@ class MultitaskBERT(nn.Module):
             elif config.option == 'finetune':
                 param.requires_grad = True
         # You will want to add layers here to perform the downstream tasks.
-        ### TODO
-        raise NotImplementedError
-
+        # print(config)
+        self.sentiment_proj = nn.Linear(config.hidden_size, len(config.num_labels))
+        self.paraphrase_proj = nn.Linear(config.hidden_size, config.hidden_size * 2)
+        self.similarity_proj = nn.Linear(config.hidden_size, config.hidden_size * 2)
+        self.dropout = nn.Dropout(config.hidden_dropout_prob)
+        # ### TODO
+        # raise NotImplementedError
 
     def forward(self, input_ids, attention_mask):
         'Takes a batch of sentences and produces embeddings for them.'
@@ -81,8 +85,15 @@ class MultitaskBERT(nn.Module):
         # Here, you can start by just returning the embeddings straight from BERT.
         # When thinking of improvements, you can later try modifying this
         # (e.g., by adding other layers).
-        ### TODO
-        raise NotImplementedError
+
+        # TODO: try using another linear layer on last_hidden_state to produce something
+        #  to return
+        encode_dict = self.bert(input_ids, attention_mask)
+        pooler_output = encode_dict['pooler_output']
+        pooler_output = self.dropout(pooler_output)
+        # ### TODO
+        # raise NotImplementedError
+        return(pooler_output)
 
 
     def predict_sentiment(self, input_ids, attention_mask):
@@ -91,8 +102,14 @@ class MultitaskBERT(nn.Module):
         (0 - negative, 1- somewhat negative, 2- neutral, 3- somewhat positive, 4- positive)
         Thus, your output should contain 5 logits for each sentence.
         '''
-        ### TODO
-        raise NotImplementedError
+
+        # TODO: another layer of attention?
+        sent_encode = self.forward(input_ids, attention_mask)
+        proj = self.sentiment_proj(sent_encode)
+        pred = F.softmax(proj, dim=-1)
+        # ### TODO
+        # raise NotImplementedError
+        return (pred)
 
 
     def predict_paraphrase(self,
@@ -102,8 +119,17 @@ class MultitaskBERT(nn.Module):
         Note that your output should be unnormalized (a logit); it will be passed to the sigmoid function
         during evaluation.
         '''
-        ### TODO
-        raise NotImplementedError
+
+        # TODO: another layer of attention?
+        sent_encode_1 = self.forward(input_ids_1, attention_mask_1)
+        sent_encode_2 = self.forward(input_ids_2, attention_mask_2)
+        proj_1 = self.paraphrase_proj(sent_encode_1)
+        proj_2 = self.paraphrase_proj(sent_encode_2)
+        product = proj_1 * proj_2
+        pred = product.sum(dim=1)
+        # ### TODO
+        # raise NotImplementedError
+        return(pred)
 
 
     def predict_similarity(self,
@@ -112,8 +138,17 @@ class MultitaskBERT(nn.Module):
         '''Given a batch of pairs of sentences, outputs a single logit corresponding to how similar they are.
         Note that your output should be unnormalized (a logit).
         '''
-        ### TODO
-        raise NotImplementedError
+
+        # TODO: another layer of attention?
+        sent_encode_1 = self.forward(input_ids_1, attention_mask_1)
+        sent_encode_2 = self.forward(input_ids_2, attention_mask_2)
+        proj_1 = self.similarity_proj(sent_encode_1)
+        proj_2 = self.similarity_proj(sent_encode_2)
+        product = proj_1 * proj_2
+        pred = product.sum(dim=1)
+        # ### TODO
+        # raise NotImplementedError
+        return(pred)
 
 
 
@@ -141,7 +176,13 @@ def train_multitask(args):
     look at test_multitask below to see how you can use the custom torch `Dataset`s
     in datasets.py to load in examples from the Quora and SemEval datasets.
     '''
-    device = torch.device('cuda') if args.use_gpu else torch.device('cpu')
+    # device = torch.device('cuda') if args.use_gpu else torch.device('cpu')
+    device = torch.device('cpu')
+    if torch.cuda.is_available():
+        device = torch.device('cuda')
+    elif torch.backends.mps.is_available():
+        device = torch.device('mps')
+    print(f'working on device: {device}')
     # Create the data and its corresponding datasets and dataloader.
     sst_train_data, num_labels,para_train_data, sts_train_data = load_multitask_data(args.sst_train,args.para_train,args.sts_train, split ='train')
     sst_dev_data, num_labels,para_dev_data, sts_dev_data = load_multitask_data(args.sst_dev,args.para_dev,args.sts_dev, split ='train')
@@ -208,7 +249,13 @@ def train_multitask(args):
 def test_multitask(args):
     '''Test and save predictions on the dev and test sets of all three tasks.'''
     with torch.no_grad():
-        device = torch.device('cuda') if args.use_gpu else torch.device('cpu')
+        # device = torch.device('cuda') if args.use_gpu else torch.device('cpu')
+        device = torch.device('cpu')
+        if torch.cuda.is_available():
+            device = torch.device('cuda')
+        elif torch.backends.mps.is_available():
+            device = torch.device('mps')
+        print(f'working on device: {device}')
         saved = torch.load(args.filepath)
         config = saved['model_config']
 
