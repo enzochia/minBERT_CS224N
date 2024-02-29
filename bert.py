@@ -56,7 +56,7 @@ class BertSelfAttention(nn.Module):
     att = torch.matmul(query, key.transpose(-2, -1)) * (1.0 / math.sqrt(head_size))
     # pay attention here, this may be implemented wrong
     # https://huggingface.co/docs/transformers/glossary#attention-mask
-    att = att.masked_fill(attention_mask[:bs, :, :, :seq_len] < 0, -10000)
+    att = att.masked_fill(attention_mask[:bs, :, :, :seq_len] < 0, float('-inf'))
     att = F.softmax(att, dim=-1)
     att = self.dropout(att)
     # (bs, num_heads, seq_len, seq_len) x (bs, num_heads, seq_len, head_size)
