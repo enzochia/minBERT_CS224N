@@ -71,10 +71,8 @@ class MultitaskBERT(nn.Module):
             elif config.option == 'finetune':
                 param.requires_grad = True
         # You will want to add layers here to perform the downstream tasks.
-        # print(config)
         self.sentiment_proj = nn.Linear(config.hidden_size, len(config.num_labels))
-        self.paraphrase_proj_1 = nn.Linear(config.hidden_size, config.hidden_size * 2)
-        self.paraphrase_proj_2 = nn.Linear(config.hidden_size, config.hidden_size * 2)
+        self.paraphrase_proj = nn.Linear(config.hidden_size, config.hidden_size * 2)
         self.similarity_proj = nn.Linear(config.hidden_size, config.hidden_size * 2)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
         # ### TODO
@@ -112,6 +110,7 @@ class MultitaskBERT(nn.Module):
         mask_sum = mask_3d.sum(dim=-2)
         mat_product = seq_hidden * mask_3d
         pooler_output = mat_product.sum(dim=-2) / mask_sum
+        # pooler_output = seq_hidden
 
         # ### TODO
         # raise NotImplementedError
@@ -146,8 +145,8 @@ class MultitaskBERT(nn.Module):
         # TODO: CNN
         sent_encode_1 = self.forward(input_ids_1, attention_mask_1)
         sent_encode_2 = self.forward(input_ids_2, attention_mask_2)
-        proj_1 = self.paraphrase_proj_1(sent_encode_1)
-        proj_2 = self.paraphrase_proj_2(sent_encode_2)
+        proj_1 = self.paraphrase_proj(sent_encode_1)
+        proj_2 = self.paraphrase_proj(sent_encode_2)
         product = proj_1 * proj_2
         pred = product.sum(dim=1)
         # ### TODO
@@ -217,7 +216,6 @@ def train_multitask(args):
                                       collate_fn=sst_train_data.collate_fn)
     sst_dev_dataloader = DataLoader(sst_dev_data, shuffle=False, batch_size=args.batch_size,
                                     collate_fn=sst_dev_data.collate_fn)
-
     # Init model.
     config = {'hidden_dropout_prob': args.hidden_dropout_prob,
               'num_labels': num_labels,
@@ -242,7 +240,6 @@ def train_multitask(args):
         for batch in tqdm(sst_train_dataloader, desc=f'train-{epoch}', disable=TQDM_DISABLE):
             b_ids, b_mask, b_labels = (batch['token_ids'],
                                        batch['attention_mask'], batch['labels'])
-
             b_ids = b_ids.to(device)
             b_mask = b_mask.to(device)
             b_labels = b_labels.to(device)
