@@ -73,7 +73,8 @@ class MultitaskBERT(nn.Module):
         # You will want to add layers here to perform the downstream tasks.
         # print(config)
         self.sentiment_proj = nn.Linear(config.hidden_size, len(config.num_labels))
-        self.paraphrase_proj = nn.Linear(config.hidden_size, config.hidden_size * 2)
+        self.paraphrase_proj_1 = nn.Linear(config.hidden_size, config.hidden_size * 2)
+        self.paraphrase_proj_2 = nn.Linear(config.hidden_size, config.hidden_size * 2)
         self.similarity_proj = nn.Linear(config.hidden_size, config.hidden_size * 2)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
         # ### TODO
@@ -83,11 +84,14 @@ class MultitaskBERT(nn.Module):
         'Takes a batch of sentences and produces embeddings for them.'
         """
         performance:
-                                dev sentiment acc   dev paraphrase acc  dev sts corr
-        return pooler   pretrain            0.384                0.376        -0.041
-                        finetune            0.523                0.388         0.164
-        return mean     pretrain            0.444                0.375         0.261
-        of seq att      finetune            0.514                0.394         0.369
+                                                  dev sentiment acc   dev paraphrase acc  dev sts corr
+        return pooler                   pretrain            0.384                0.376        -0.041
+                                        finetune            0.523                0.388         0.164
+        return mean                     pretrain            0.444                0.375         0.261
+        of seq att                      finetune            0.514                0.394         0.369
+        mean seq att,2                  pretrain            0.444                0.375         0.261
+        ln for para                     finetune            0.514                0.394         0.369
+        
         """
         # The final BERT embedding is the hidden state of [CLS] token (the first token)
         # Here, you can start by just returning the embeddings straight from BERT.
@@ -142,8 +146,8 @@ class MultitaskBERT(nn.Module):
         # TODO: CNN
         sent_encode_1 = self.forward(input_ids_1, attention_mask_1)
         sent_encode_2 = self.forward(input_ids_2, attention_mask_2)
-        proj_1 = self.paraphrase_proj(sent_encode_1)
-        proj_2 = self.paraphrase_proj(sent_encode_2)
+        proj_1 = self.paraphrase_proj_1(sent_encode_1)
+        proj_2 = self.paraphrase_proj_2(sent_encode_2)
         product = proj_1 * proj_2
         pred = product.sum(dim=1)
         # ### TODO
