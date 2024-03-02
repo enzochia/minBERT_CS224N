@@ -90,10 +90,11 @@ class MultitaskBERT(nn.Module):
                                         finetune            0.523                0.388         0.164
         return mean                     pretrain            0.463                0.375         0.261        557
         of seq att (masks excl'd)       finetune            0.528                0.386         0.345        1573
+        return mean                     pretrain            0.470                0.375         0.329        552
+        of seq att (masks incl'd)       finetune            0.527                0.393         0.254        1596
+              
         mean seq att  (masks excl'd)    pretrain            0.444                0.375         0.261
         2 ln for para                   finetune            0.514                0.394         0.369
-        return mean                     pretrain            0.470                0.375         0.329
-        of seq att (masks incl'd)       finetune            0.527                0.393         0.254      
         masks incl'd for sent, not for  pretrain            0.470                0.375         0.261
         para&sts. 1 big ln              finetune            0.527                0.394         0.281  
         masks incl'd for sent, not for  pretrain            0.470                0.470         0.275
@@ -115,7 +116,7 @@ class MultitaskBERT(nn.Module):
         encode_dict = self.bert(input_ids, attention_mask)
         seq_hidden = encode_dict['last_hidden_state']
         seq_hidden = self.dropout(seq_hidden)
-        pooler_output = self.get_mean_bert_output(seq_hidden, attention_mask, True)
+        pooler_output = self.get_mean_bert_output(seq_hidden, attention_mask, False)
 
         # ### TODO
         # raise NotImplementedError
