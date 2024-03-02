@@ -12,6 +12,7 @@ Running `python multitask_classifier.py` trains and tests your MultitaskBERT and
 writes all required submission files.
 '''
 
+import time
 import random, numpy as np, argparse
 from types import SimpleNamespace
 
@@ -84,17 +85,20 @@ class MultitaskBERT(nn.Module):
         'Takes a batch of sentences and produces embeddings for them.'
         """
         performance:
-                                                  dev sentiment acc   dev paraphrase acc  dev sts corr
+                                                  dev sentiment acc   dev paraphrase acc  dev sts corr  training time (secs)
         return pooler                   pretrain            0.384                0.376        -0.041
                                         finetune            0.523                0.388         0.164
-        return mean                     pretrain            0.444                0.375         0.261
-        of seq att (masks excl'd)       finetune            0.514                0.394         0.369
+        return mean                     pretrain            0.463                0.375         0.261        557
+        of seq att (masks excl'd)       finetune            0.528                0.386         0.345        1573
         mean seq att  (masks excl'd)    pretrain            0.444                0.375         0.261
         2 ln for para                   finetune            0.514                0.394         0.369
         return mean                     pretrain            0.470                0.375         0.329
-        of seq att (masks incl'd)       finetune            0.527                0.393         0.254    
-        smaller proj, return mean       pretrain            0.470                0.375         0.329
-        of seq att (masks incl'd)       finetune            0.527                0.393         0.254        
+        of seq att (masks incl'd)       finetune            0.527                0.393         0.254      
+        masks incl'd for sent, not for  pretrain            0.470                0.375         0.261
+        para&sts. 1 big ln              finetune            0.527                0.394         0.281  
+        masks incl'd for sent, not for  pretrain            0.470                0.470         0.275
+        para&sts. 2 big ln for para     finetune            0.520                0.454         0.318  
+            
         """
         # The final BERT embedding is the hidden state of [CLS] token (the first token)
         # Here, you can start by just returning the embeddings straight from BERT.
@@ -103,6 +107,7 @@ class MultitaskBERT(nn.Module):
 
         # TODO: try using another linear layer on last_hidden_state to produce something
         #  to return
+        # TODO: dropout after getting mean
         # encode_dict = self.bert(input_ids, attention_mask)
         # pooler_output = encode_dict['pooler_output']
         # pooler_output = self.dropout(pooler_output)
@@ -110,13 +115,7 @@ class MultitaskBERT(nn.Module):
         encode_dict = self.bert(input_ids, attention_mask)
         seq_hidden = encode_dict['last_hidden_state']
         seq_hidden = self.dropout(seq_hidden)
-
-        # # mask_3d = attention_mask[:, :, None]
-        # # mask_sum = mask_3d.sum(dim=-2)
-        # # mat_product = seq_hidden * mask_3d
-        # # pooler_output = mat_product.sum(dim=-2) / mask_sum
-        # pooler_output = seq_hidden.sum(dim=-2) / seq_hidden.size()[-2]
-        pooler_output = seq_hidden
+        pooler_output = self.get_mean_bert_output(seq_hidden, attention_mask, True)
 
         # ### TODO
         # raise NotImplementedError
@@ -142,8 +141,7 @@ class MultitaskBERT(nn.Module):
 
         # TODO: another layer of attention?
         sent_encode = self.forward(input_ids, attention_mask)
-        # mean of seq attn, masks incl'd
-        sent_encode = self.get_mean_bert_output(sent_encode, attention_mask, False)
+        # sent_encode = self.get_mean_bert_output(sent_encode, attention_mask, False)
         proj = self.sentiment_proj(sent_encode)
         pred = F.softmax(proj, dim=-1)
         # ### TODO
@@ -163,12 +161,10 @@ class MultitaskBERT(nn.Module):
         # TODO: CNN
         sent_encode_1 = self.forward(input_ids_1, attention_mask_1)
         sent_encode_2 = self.forward(input_ids_2, attention_mask_2)
-        sent_encode_1 = self.get_mean_bert_output(sent_encode_1, attention_mask_1)
-        sent_encode_2 = self.get_mean_bert_output(sent_encode_2, attention_mask_2)
+        # sent_encode_1 = self.get_mean_bert_output(sent_encode_1, attention_mask_1)
+        # sent_encode_2 = self.get_mean_bert_output(sent_encode_2, attention_mask_2)
         proj_1 = self.paraphrase_proj(sent_encode_1)
         proj_2 = self.paraphrase_proj(sent_encode_2)
-        # proj_1 = self.paraphrase_proj_1(sent_encode_1)
-        # proj_2 = self.paraphrase_proj_2(sent_encode_2)
         product = proj_1 * proj_2
         pred = product.sum(dim=1)
         # ### TODO
@@ -184,10 +180,11 @@ class MultitaskBERT(nn.Module):
         '''
 
         # TODO: another layer of attention?
+        # TODO: 2 proj layers?
         sent_encode_1 = self.forward(input_ids_1, attention_mask_1)
         sent_encode_2 = self.forward(input_ids_2, attention_mask_2)
-        sent_encode_1 = self.get_mean_bert_output(sent_encode_1, attention_mask_1)
-        sent_encode_2 = self.get_mean_bert_output(sent_encode_2, attention_mask_2)
+        # sent_encode_1 = self.get_mean_bert_output(sent_encode_1, attention_mask_1)
+        # sent_encode_2 = self.get_mean_bert_output(sent_encode_2, attention_mask_2)
         proj_1 = self.similarity_proj(sent_encode_1)
         proj_2 = self.similarity_proj(sent_encode_2)
         product = proj_1 * proj_2
@@ -426,5 +423,10 @@ if __name__ == "__main__":
     args = get_args()
     args.filepath = f'{args.option}-{args.epochs}-{args.lr}-multitask.pt' # Save path.
     seed_everything(args.seed)  # Fix the seed for reproducibility.
+    train_start = time.time()
     train_multitask(args)
+    test_start = time.time()
+    print(f'Training cost {int(test_start - train_start)} seconds')
     test_multitask(args)
+    test_end = time.time()
+    print(f'Testing cost {int(test_end - test_start)} seconds')
