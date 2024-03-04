@@ -73,9 +73,9 @@ class MultitaskBERT(nn.Module):
                 param.requires_grad = True
         # You will want to add layers here to perform the downstream tasks.
         self.sentiment_proj = nn.Linear(config.hidden_size, len(config.num_labels))
-        self.paraphrase_proj = nn.Linear(config.hidden_size, config.hidden_size * 2)
-        # self.paraphrase_proj_1 = nn.Linear(config.hidden_size, config.hidden_size * 2)
-        # self.paraphrase_proj_2 = nn.Linear(config.hidden_size, config.hidden_size * 2)
+        # self.paraphrase_proj = nn.Linear(config.hidden_size, config.hidden_size * 2)
+        self.paraphrase_proj_1 = nn.Linear(config.hidden_size, config.hidden_size * 2)
+        self.paraphrase_proj_2 = nn.Linear(config.hidden_size, config.hidden_size * 2)
         self.similarity_proj = nn.Linear(config.hidden_size, config.hidden_size * 2)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
         # ### TODO
@@ -85,15 +85,21 @@ class MultitaskBERT(nn.Module):
         'Takes a batch of sentences and produces embeddings for them.'
         """
         performance:
-                                                  dev sentiment acc   dev paraphrase acc  dev sts corr  training time (secs)
-        return pooler                   pretrain            0.384                0.376        -0.041
-                                        finetune            0.523                0.388         0.164
-        drop out seq, return mean       pretrain            0.463                0.375         0.261        557
-        of seq att (masks excl'd)       finetune            0.528                0.386         0.345        1573
-        drop out seq, return mean       pretrain            0.470                0.375         0.329        552
-        of seq att (masks incl'd)       finetune            0.527                0.393         0.254        1596
-        drop out mean, return mean      pretrain            0.459                0.375         0.261        559
-        of seq att (masks excl'd)       finetune            0.539                0.382         0.345        1589
+                                                          dev sentiment acc   dev paraphrase acc  dev sts corr  training time (secs)
+        return pooler                           pretrain            0.384                0.376        -0.041
+                                                finetune            0.523                0.388         0.164
+        drop out seq, return mean               pretrain            0.463                0.375         0.261        557
+        of seq att (masks excl'd)               finetune            0.528                0.386         0.345        1573
+        drop out seq, return mean               pretrain            0.470                0.375         0.329        552
+        of seq att (masks incl'd)               finetune            0.527                0.393         0.254        1596
+        drop out mean, return mean              pretrain            0.459                0.375         0.261        559
+        of seq att (masks excl'd)               finetune            0.539                0.382         0.345        1589
+        drop out mean, return mean              pretrain            0.476                0.375         0.329        608
+        of seq att (masks incl'd)               finetune            0.526                0.395         0.332        1637
+        drop out late, return mean              pretrain            0.459                0.375         0.261        586
+        of seq att (masks various)              finetune            0.539                0.381         0.345        1594
+        drop out late, 2 para ln, return mean   pretrain            0.464                0.443         0.275        545
+        of seq att (masks various)              finetune            0.520                0.525         0.321        1530
               
         mean seq att  (masks excl'd)    pretrain            0.444                0.375         0.261
         2 ln for para                   finetune            0.514                0.394         0.369
@@ -118,8 +124,9 @@ class MultitaskBERT(nn.Module):
         encode_dict = self.bert(input_ids, attention_mask)
         seq_hidden = encode_dict['last_hidden_state']
         # seq_hidden = self.dropout(seq_hidden)
-        pooler_output = self.get_mean_bert_output(seq_hidden, attention_mask, True)
-        pooler_output = self.dropout(pooler_output)
+        # pooler_output = self.get_mean_bert_output(seq_hidden, attention_mask, True)
+        # pooler_output = self.dropout(pooler_output)
+        pooler_output = seq_hidden
         # ### TODO
         # raise NotImplementedError
         return(pooler_output)
@@ -145,7 +152,8 @@ class MultitaskBERT(nn.Module):
         # TODO: another layer of attention?
         # TODO: another dropout?
         sent_encode = self.forward(input_ids, attention_mask)
-        # sent_encode = self.get_mean_bert_output(sent_encode, attention_mask, False)
+        sent_encode = self.get_mean_bert_output(sent_encode, attention_mask, True)
+        sent_encode = self.dropout(sent_encode)
         proj = self.sentiment_proj(sent_encode)
         pred = F.softmax(proj, dim=-1)
         # ### TODO
@@ -166,10 +174,12 @@ class MultitaskBERT(nn.Module):
         # TODO: another dropout?
         sent_encode_1 = self.forward(input_ids_1, attention_mask_1)
         sent_encode_2 = self.forward(input_ids_2, attention_mask_2)
-        # sent_encode_1 = self.get_mean_bert_output(sent_encode_1, attention_mask_1)
-        # sent_encode_2 = self.get_mean_bert_output(sent_encode_2, attention_mask_2)
-        proj_1 = self.paraphrase_proj(sent_encode_1)
-        proj_2 = self.paraphrase_proj(sent_encode_2)
+        sent_encode_1 = self.get_mean_bert_output(sent_encode_1, attention_mask_1, False)
+        sent_encode_2 = self.get_mean_bert_output(sent_encode_2, attention_mask_2, False)
+        proj_1 = self.paraphrase_proj_1(sent_encode_1)
+        proj_2 = self.paraphrase_proj_2(sent_encode_2)
+        proj_1 = self.dropout(proj_1)
+        proj_2 = self.dropout(proj_2)
         product = proj_1 * proj_2
         pred = product.sum(dim=1)
         # ### TODO
@@ -189,10 +199,12 @@ class MultitaskBERT(nn.Module):
         # TODO: another dropout?
         sent_encode_1 = self.forward(input_ids_1, attention_mask_1)
         sent_encode_2 = self.forward(input_ids_2, attention_mask_2)
-        # sent_encode_1 = self.get_mean_bert_output(sent_encode_1, attention_mask_1)
-        # sent_encode_2 = self.get_mean_bert_output(sent_encode_2, attention_mask_2)
+        sent_encode_1 = self.get_mean_bert_output(sent_encode_1, attention_mask_1, True)
+        sent_encode_2 = self.get_mean_bert_output(sent_encode_2, attention_mask_2, True)
         proj_1 = self.similarity_proj(sent_encode_1)
         proj_2 = self.similarity_proj(sent_encode_2)
+        proj_1 = self.dropout(proj_1)
+        proj_2 = self.dropout(proj_2)
         product = proj_1 * proj_2
         pred = product.sum(dim=1)
         # ### TODO
