@@ -13,6 +13,7 @@ writes all required submission files.
 '''
 
 import time
+import sys
 import random, numpy as np, argparse
 from types import SimpleNamespace
 
@@ -74,11 +75,7 @@ class MultitaskBERT(nn.Module):
         # You will want to add layers here to perform the downstream tasks.
         self.sentiment_proj = nn.Linear(config.hidden_size, len(config.num_labels))
         self.paraphrase_proj = nn.Linear(config.hidden_size, config.hidden_size * 2)
-        # self.paraphrase_proj_1 = nn.Linear(config.hidden_size, config.hidden_size * 2)
-        # self.paraphrase_proj_2 = nn.Linear(config.hidden_size, config.hidden_size * 2)
         self.similarity_proj = nn.Linear(config.hidden_size, config.hidden_size * 2)
-        # self.similarity_proj_1 = nn.Linear(config.hidden_size, config.hidden_size * 2)
-        # self.similarity_proj_2 = nn.Linear(config.hidden_size, config.hidden_size * 2)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
         # ### TODO
         # raise NotImplementedError
@@ -123,16 +120,13 @@ class MultitaskBERT(nn.Module):
         # When thinking of improvements, you can later try modifying this
         # (e.g., by adding other layers).
 
-        # TODO: try using another linear layer on last_hidden_state to produce something
-        #  to return
-        # TODO: dropout after getting mean
+        # this is directly return first token's BERT attention
         # encode_dict = self.bert(input_ids, attention_mask)
         # pooler_output = encode_dict['pooler_output']
         # pooler_output = self.dropout(pooler_output)
 
         encode_dict = self.bert(input_ids, attention_mask)
         seq_hidden = encode_dict['last_hidden_state']
-        # seq_hidden = self.dropout(seq_hidden)
         pooler_output = self.get_mean_bert_output(seq_hidden, attention_mask, True)
         pooler_output = self.dropout(pooler_output)
         # pooler_output = seq_hidden
@@ -141,6 +135,10 @@ class MultitaskBERT(nn.Module):
         return(pooler_output)
 
     def get_mean_bert_output(self, seq_encode, attention_mask, mask_excluded=True):
+        """"
+        Given a sequence's all token's BERT attention outputs, return mean attention,
+        with or without masks' attention outputs.
+        """
         if mask_excluded:
             mask_3d = attention_mask[:, :, None]
             mask_sum = mask_3d.sum(dim=-2)
@@ -158,15 +156,11 @@ class MultitaskBERT(nn.Module):
         Thus, your output should contain 5 logits for each sentence.
         '''
 
-        # TODO: another layer of attention?
-        # TODO: another dropout?
+        # TODO: attention
+        # TODO: another dropout
         sent_encode = self.forward(input_ids, attention_mask)
-        # sent_encode = self.get_mean_bert_output(sent_encode, attention_mask, True)
-        # sent_encode = self.dropout(sent_encode)
         proj = self.sentiment_proj(sent_encode)
         pred = F.softmax(proj, dim=-1)
-        # ### TODO
-        # raise NotImplementedError
         return (pred)
 
 
@@ -178,22 +172,16 @@ class MultitaskBERT(nn.Module):
         during evaluation.
         '''
 
-        # TODO: another layer of attention?
+        # TODO: attention
         # TODO: CNN
-        # TODO: another dropout?
-        # TODO: bigger layer(s)?
+        # TODO: another dropout
+        # TODO: bigger layer(s)
         sent_encode_1 = self.forward(input_ids_1, attention_mask_1)
         sent_encode_2 = self.forward(input_ids_2, attention_mask_2)
-        # sent_encode_1 = self.get_mean_bert_output(sent_encode_1, attention_mask_1, True)
-        # sent_encode_2 = self.get_mean_bert_output(sent_encode_2, attention_mask_2, True)
         proj_1 = self.paraphrase_proj(sent_encode_1)
         proj_2 = self.paraphrase_proj(sent_encode_2)
-        # proj_1 = self.dropout(proj_1)
-        # proj_2 = self.dropout(proj_2)
         product = proj_1 * proj_2
         pred = product.sum(dim=1)
-        # ### TODO
-        # raise NotImplementedError
         return(pred)
 
 
@@ -204,21 +192,15 @@ class MultitaskBERT(nn.Module):
         Note that your output should be unnormalized (a logit).
         '''
 
-        # TODO: another layer of attention?
-        # TODO: 2 proj layers?
-        # TODO: another dropout?
+        # TODO: attention
+        # TODO: another dropout
+        # TODO: bigger layer(s)
         sent_encode_1 = self.forward(input_ids_1, attention_mask_1)
         sent_encode_2 = self.forward(input_ids_2, attention_mask_2)
-        # sent_encode_1 = self.get_mean_bert_output(sent_encode_1, attention_mask_1, True)
-        # sent_encode_2 = self.get_mean_bert_output(sent_encode_2, attention_mask_2, True)
         proj_1 = self.similarity_proj(sent_encode_1)
         proj_2 = self.similarity_proj(sent_encode_2)
-        # proj_1 = self.dropout(proj_1)
-        # proj_2 = self.dropout(proj_2)
         product = proj_1 * proj_2
         pred = product.sum(dim=1)
-        # ### TODO
-        # raise NotImplementedError
         return(pred)
 
 
@@ -353,7 +335,7 @@ def train_multitask(args):
 
             optimizer.zero_grad()
             logits = model.predict_paraphrase(b_ids_1, b_mask_1, b_ids_2, b_mask_2)
-            loss = BCE_logits(logits, b_labels.view(-1).float())
+            loss = F.cross_entropy(logits, b_labels.view(-1).float(), reduction='sum') / args.batch_size
 
             loss.backward()
             optimizer.step()
@@ -383,7 +365,7 @@ def train_multitask(args):
             best_dev_score = dev_score
             save_model(model, optimizer, args, config, args.filepath)
 
-        print(f"Epoch {epoch}: train loss :: {train_loss :.3f}, train acc :: {train_score :.3f}, dev acc :: {dev_score :.3f}")
+        print(f"Epoch {epoch}: train loss :: {train_loss :.3f}, train score :: {train_score :.3f}, dev score :: {dev_score :.3f}")
 
 
 def test_multitask(args):
@@ -523,9 +505,16 @@ if __name__ == "__main__":
     args.filepath = f'{args.option}-{args.epochs}-{args.lr}-multitask.pt' # Save path.
     seed_everything(args.seed)  # Fix the seed for reproducibility.
     train_start = time.time()
+    # old_stdout = sys.stdout
+    # log_file = open("message" + args.option + str(int(train_start)) +".log", "w")
+    # sys.stdout = log_file
+
     train_multitask(args)
     test_start = time.time()
     print(f'Training cost {int(test_start - train_start)} seconds')
     test_multitask(args)
     test_end = time.time()
     print(f'Testing cost {int(test_end - test_start)} seconds')
+
+    # sys.stdout = old_stdout
+    # log_file.close()
