@@ -134,7 +134,7 @@ class MultitaskBERT(nn.Module):
         seq_hidden = encode_dict['last_hidden_state']
         # seq_hidden = self.dropout(seq_hidden)
         pooler_output = self.get_mean_bert_output(seq_hidden, attention_mask, True)
-        # pooler_output = self.dropout(pooler_output)
+        pooler_output = self.dropout(pooler_output)
         # pooler_output = seq_hidden
         # ### TODO
         # raise NotImplementedError
@@ -372,9 +372,9 @@ def train_multitask(args):
 
         sst_dev_acc, _, _, \
         para_dev_acc, _, _, \
-        sts_dev_corr, _, _ =  model_eval_multitask(sst_train_dataloader,
-                                                   para_train_dataloader,
-                                                   sts_train_dataloader,
+        sts_dev_corr, _, _ =  model_eval_multitask(sst_dev_dataloader,
+                                                   para_dev_dataloader,
+                                                   sts_dev_dataloader,
                                                    model, device)
         train_score = (sst_train_acc + para_train_acc + ((1 + sts_train_corr) / 2)) / 3
         dev_score = (sst_dev_acc + para_dev_acc + ((1 + sts_dev_corr) / 2)) / 3
