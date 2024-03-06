@@ -35,7 +35,7 @@ from datasets import (
 )
 
 from evaluation import model_eval_sst, model_eval_multitask, model_eval_test_multitask
-
+eps = 1e-7
 
 TQDM_DISABLE=False
 
@@ -265,6 +265,8 @@ def train_multitask(args):
                                     collate_fn=sts_dev_data.collate_fn)
 
     BCE_logits = nn.BCEWithLogitsLoss()
+    cosSim = nn.CosineSimilarity(dim=1, eps=1e-7)
+    mseLoss = nn.MSELoss()
     # Init model.
     config = {'hidden_dropout_prob': args.hidden_dropout_prob,
               'num_labels': num_labels,
@@ -311,12 +313,11 @@ def train_multitask(args):
             b_mask_1 = b_mask_1.to(device)
             b_ids_2 = b_ids_2.to(device)
             b_mask_2 = b_mask_2.to(device)
-            b_labels = b_labels.to(device)
+            b_labels = b_labels.float().to(device)
 
             optimizer.zero_grad()
             logits = model.predict_paraphrase(b_ids_1, b_mask_1, b_ids_2, b_mask_2)
-            loss = BCE_logits(logits, b_labels.view(-1).float())
-
+            loss = F.binary_cross_entropy_with_logits(logits, b_labels.view(-1), reduction='sum') / args.batch_size
             loss.backward()
             optimizer.step()
 
@@ -331,12 +332,15 @@ def train_multitask(args):
             b_mask_1 = b_mask_1.to(device)
             b_ids_2 = b_ids_2.to(device)
             b_mask_2 = b_mask_2.to(device)
-            b_labels = b_labels.to(device)
+            b_labels = b_labels.float().to(device)
 
             optimizer.zero_grad()
             logits = model.predict_paraphrase(b_ids_1, b_mask_1, b_ids_2, b_mask_2)
-            loss = F.cross_entropy(logits, b_labels.view(-1).float(), reduction='sum') / args.batch_size
-
+            x1 = logits.view(-1, args.batch_size)
+            x2 = b_labels.view(-1, args.batch_size)
+            # this is actually pearson correlation
+            loss = -cosSim(x1 - x1.mean(dim=1, keepdim=True),
+                           x2 - x2.mean(dim=1, keepdim=True)) / args.batch_size
             loss.backward()
             optimizer.step()
 
