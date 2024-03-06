@@ -335,7 +335,7 @@ def train_multitask(args):
             b_labels = b_labels.float().to(device)
 
             optimizer.zero_grad()
-            logits = model.predict_paraphrase(b_ids_1, b_mask_1, b_ids_2, b_mask_2)
+            logits = model.predict_similarity(b_ids_1, b_mask_1, b_ids_2, b_mask_2)
             x1 = logits.view(-1, args.batch_size)
             x2 = b_labels.view(-1, args.batch_size)
             # this is actually pearson correlation
