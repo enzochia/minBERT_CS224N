@@ -509,9 +509,9 @@ if __name__ == "__main__":
     args.filepath = f'{args.option}-{args.epochs}-{args.lr}-multitask.pt' # Save path.
     seed_everything(args.seed)  # Fix the seed for reproducibility.
     train_start = time.time()
-    # old_stdout = sys.stdout
-    # log_file = open("message" + args.option + str(int(train_start)) +".log", "w")
-    # sys.stdout = log_file
+    old_stdout = sys.stdout
+    log_file = open("message" + args.option + str(int(train_start)) +".log", "w")
+    sys.stdout = log_file
 
     train_multitask(args)
     test_start = time.time()
@@ -520,5 +520,5 @@ if __name__ == "__main__":
     test_end = time.time()
     print(f'Testing cost {int(test_end - test_start)} seconds')
 
-    # sys.stdout = old_stdout
-    # log_file.close()
+    sys.stdout = old_stdout
+    log_file.close()
