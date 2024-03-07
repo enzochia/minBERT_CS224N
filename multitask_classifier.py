@@ -85,35 +85,17 @@ class MultitaskBERT(nn.Module):
         """
         performance:
                                                           dev sentiment acc   dev paraphrase acc  dev sts corr  training time (secs)
-        return pooler                           pretrain            0.384                0.376        -0.041
-                                                finetune            0.523                0.388         0.164
-        drop out seq, return mean               pretrain            0.463                0.375         0.261        557
-        of seq att (masks excl'd)               finetune            0.528                0.386         0.345        1573
-        drop out seq, return mean               pretrain            0.470                0.375         0.329        552
-        of seq att (masks incl'd)               finetune            0.527                0.393         0.254        1596
-        drop out mean, return mean              pretrain            0.459                0.375         0.261        559
-        of seq att (masks excl'd)               finetune            0.539                0.382         0.345        1589
-        drop out mean, return mean              pretrain            0.476                0.375         0.329        608
-        of seq att (masks incl'd)               finetune            0.526                0.395         0.332        1637
-        drop out late, return mean              pretrain            0.459                0.375         0.261        586
-        of seq att (masks various)              finetune            0.539                0.381         0.345        1594
-        drop out late, 2 para ln, return mean   pretrain            0.464                0.443         0.275        545
-        of seq att (masks various)              finetune            0.520                0.525         0.321        1530
-        drop out late, 16x para layer,          pretrain            0.468                0.375         0.235        567
-        return mean of seq att (masks various)  finetune            0.508                0.391         0.329        1553
-        drop out late, 2 para ln, 2 sts ln,     pretrain            0.438                0.443         -0.064        552
-        return mean of seq att (masks various)  finetune            0.523                0.442         -0.013        1576
+        order: sst, para, sts (corr loss)       pretrain            0.457                0.381         0.632        14673
+                                                finetune            0.453                0.543         0.611        37164
+
         
-        drop out early, 1 para ln, 1 sst ln,    pretrain            0.                0.         -0.        
-        return mean of seq att (masks excl'd)   finetune            0.                0.         -0.        1
-              
-        mean seq att  (masks excl'd)    pretrain            0.444                0.375         0.261
-        2 ln for para                   finetune            0.514                0.394         0.369
-        masks incl'd for sent, not for  pretrain            0.470                0.375         0.261
-        para&sts. 1 big ln              finetune            0.527                0.394         0.281  
-        masks incl'd for sent, not for  pretrain            0.470                0.470         0.275
-        para&sts. 2 big ln for para     finetune            0.520                0.454         0.318  
-            
+        
+        Note: 20240307: order: sst, sts, para. on vm ii
+                        order: para, sst, sts. on vm iii
+                        order: para, sts, sst. on vm iv
+                        order: sts, sst, para. on vm v
+                        order: sts, para, sst. on vm ii
+        
         """
         # The final BERT embedding is the hidden state of [CLS] token (the first token)
         # Here, you can start by just returning the embeddings straight from BERT.
