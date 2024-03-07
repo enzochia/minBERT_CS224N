@@ -85,16 +85,26 @@ class MultitaskBERT(nn.Module):
         """
         performance:
                                                           dev sentiment acc   dev paraphrase acc  dev sts corr  training time (secs)
-        order: sst, para, sts (corr loss)       pretrain            0.457                0.381         0.632        14673
+        order: sst, para, sts                   pretrain            0.457                0.381         0.632        14673
                                                 finetune            0.453                0.543         0.611        37164
-
+        order: sst, para, sts (mse loss)        pretrain            0.461                0.388         0.030        13800
+                                                finetune            0.268                0.507         0.290        35855
+        order: sst, sts, para                   pretrain            0.467                0.379         0.598        14637
+                                                finetune            0.481                0.488         0.171        37126
+        order: para, sst, sts                   pretrain            0.459                0.384         0.621        13932
+                                                finetune            0.262                0.460         0.298        36022
         
-        
-        Note: 20240307: order: sst, sts, para. on vm ii
-                        order: para, sst, sts. on vm iii
-                        order: para, sts, sst. on vm iv
-                        order: sts, sst, para. on vm v
-                        order: sts, para, sst. on vm ii
+        Note: 20240307: order: sst, sts, para. on vm ii  -- 03/07 am
+                        order: para, sst, sts. on vm iii -- 03/07 am
+                        order: para, sts, sst. on vm iv  -- 03/07 am
+                        order: sts, sst, para. on vm ii  -- 03/07 pm
+                        order: sts, para, sst. on vm iii -- 03/07 pm
+                        
+                        loss: mse for sts   
+                        order: sst, para, sts. on vm v   -- 03/07 am
+                        
+                        single finetune
+                        sst.                   on vm v   -- 03/07 pm
         
         """
         # The final BERT embedding is the hidden state of [CLS] token (the first token)
@@ -323,6 +333,8 @@ def train_multitask(args):
             # this is actually pearson correlation
             loss = -cosSim(x1 - x1.mean(dim=1, keepdim=True),
                            x2 - x2.mean(dim=1, keepdim=True)) / args.batch_size
+            # logits = model.predict_similarity(b_ids_1, b_mask_1, b_ids_2, b_mask_2).sigmoid() * 5.0
+            # loss = F.mse_loss(logits, b_labels.view(-1), reduction='sum') / args.batch_size
             loss.backward()
             optimizer.step()
 
