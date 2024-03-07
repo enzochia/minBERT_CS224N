@@ -264,9 +264,7 @@ def train_multitask(args):
     sts_dev_dataloader = DataLoader(sts_dev_data, shuffle=False, batch_size=args.batch_size,
                                     collate_fn=sts_dev_data.collate_fn)
 
-    BCE_logits = nn.BCEWithLogitsLoss()
     cosSim = nn.CosineSimilarity(dim=1, eps=1e-7)
-    mseLoss = nn.MSELoss()
     # Init model.
     config = {'hidden_dropout_prob': args.hidden_dropout_prob,
               'num_labels': num_labels,
@@ -318,6 +316,8 @@ def train_multitask(args):
             optimizer.zero_grad()
             logits = model.predict_paraphrase(b_ids_1, b_mask_1, b_ids_2, b_mask_2)
             loss = F.binary_cross_entropy_with_logits(logits, b_labels.view(-1), reduction='sum') / args.batch_size
+            # y_hat = logits.sigmoid().round()
+            # loss = -torch.eq(y_hat, b_labels).float().mean()
             loss.backward()
             optimizer.step()
 
