@@ -93,6 +93,14 @@ class MultitaskBERT(nn.Module):
                                                 finetune            0.481                0.488         0.171        37126
         order: para, sst, sts                   pretrain            0.459                0.384         0.621        13932
                                                 finetune            0.262                0.460         0.298        36022
+        order: para, sts, sst                   pretrain            0.451                0.380         0.636        14500
+                                                finetune            0.500                0.485         0.344        37124
+        order: sts, sst, para                   pretrain            0.473                0.390         0.563        14627
+                                                finetune            0.361                0.568         0.180        37118
+        order: sts, sst, para                   pretrain            0.463                0.386         0.594        13916
+                                                finetune            0.369                0.407         0.193        35927
+        task specific finetune                  pretrain            0.460                0.388         0.643        819 + 13259 + 837
+                                                finetune            0.515                0.550         0.854        1829 + 33475 + 1715
         
         Note: 20240307: order: sst, sts, para. on vm ii  -- 03/07 am
                         order: para, sst, sts. on vm iii -- 03/07 am
@@ -105,6 +113,14 @@ class MultitaskBERT(nn.Module):
                         
                         single finetune
                         sst.                   on vm v   -- 03/07 pm
+                        sts 2x.                on vm v   -- 03/07 pm
+                        sts 4x.                on vm v   -- 03/07 pm
+                        sts 8x.                on vm v   -- 03/07 pm
+                        para 2x.               on vm v   -- 03/07 pm
+                        para 1x.               on vm ii  -- 03/08 am
+                        para 4x.               on vm iii -- 03/08 am
+                        para 8x.               on vm iv  -- 03/08 am
+                        sts 1x.                on vm v   -- 03/08 am
         
         """
         # The final BERT embedding is the hidden state of [CLS] token (the first token)
@@ -274,6 +290,7 @@ def train_multitask(args):
     best_dev_score = 0
 
     # Run for the specified number of epochs.
+    # sst, para, and sts are finetuned separately.
     for epoch in range(args.epochs):
         model.train()
         train_loss = 0
