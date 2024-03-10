@@ -103,8 +103,11 @@ class MultitaskBERT(nn.Module):
                                                 finetune            0.361                0.568         0.180        37118
         order: sts, sst, para                   pretrain            0.463                0.386         0.594        13916
                                                 finetune            0.369                0.407         0.193        35927
+        task specific finetune                  pretrain            0.389                0.401         0.298        868 + 13274 + 864
+        first token                             finetune            0.504                0.595         0.587        1886 + 33475 + 1822
         task specific finetune                  pretrain            0.460                0.388         0.643        819 + 13259 + 837
-                                                finetune            0.515                0.550         0.854        1829 + 33475 + 1715
+        mean of seq                             finetune            0.515                0.550         0.854        1829 + 33475 + 1715
+                                                
         
         Note: 20240307: order: sst, sts, para. on vm ii  -- 03/07 am
                         order: para, sst, sts. on vm iii -- 03/07 am
@@ -190,8 +193,9 @@ class MultitaskBERT(nn.Module):
         # attention
         extended_attention_mask: torch.Tensor = get_extended_attention_mask(attention_mask, self.bert.dtype)
         attn_seq = self.self_attn(sent_encode, extended_attention_mask)
-        attn = attn_seq[:, 0]
-        # attn = self.get_mean_bert_output(attn_seq, attention_mask, True)
+        # attn = attn_seq[:, 0]
+        attn = self.get_mean_bert_output(attn_seq, attention_mask, True)
+        attn = self.dropout(attn)
         proj = self.sentiment_proj(attn)
         pred = F.softmax(proj, dim=-1)
         return (pred)
@@ -214,8 +218,10 @@ class MultitaskBERT(nn.Module):
         # sent_encode_2 = self.forward(input_ids_2, attention_mask_2)
         sent_encode_1 = self.forward(input_ids_1, attention_mask_1)
         sent_encode_1 = self.get_mean_bert_output(sent_encode_1, attention_mask_1, True)
+        sent_encode_1 = self.dropout(sent_encode_1)
         sent_encode_2 = self.forward(input_ids_2, attention_mask_2)
         sent_encode_2 = self.get_mean_bert_output(sent_encode_2, attention_mask_2, True)
+        sent_encode_2 = self.dropout(sent_encode_2)
         proj_1 = self.paraphrase_proj(sent_encode_1)
         proj_2 = self.paraphrase_proj(sent_encode_2)
         product = proj_1 * proj_2
@@ -237,8 +243,10 @@ class MultitaskBERT(nn.Module):
         # sent_encode_2 = self.forward(input_ids_2, attention_mask_2)
         sent_encode_1 = self.forward(input_ids_1, attention_mask_1)
         sent_encode_1 = self.get_mean_bert_output(sent_encode_1, attention_mask_1, True)
+        sent_encode_1 = self.dropout(sent_encode_1)
         sent_encode_2 = self.forward(input_ids_2, attention_mask_2)
         sent_encode_2 = self.get_mean_bert_output(sent_encode_2, attention_mask_2, True)
+        sent_encode_2 = self.dropout(sent_encode_2)
         proj_1 = self.similarity_proj(sent_encode_1)
         proj_2 = self.similarity_proj(sent_encode_2)
         product = proj_1 * proj_2
