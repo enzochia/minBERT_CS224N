@@ -14,6 +14,7 @@ writes all required submission files.
 
 import time
 import sys
+import math
 import random, numpy as np, argparse
 from types import SimpleNamespace
 
@@ -35,7 +36,7 @@ from datasets import (
     load_multitask_data
 )
 
-from evaluation import model_eval_sst, model_eval_multitask, model_eval_test_multitask
+from evaluation import model_eval_sst, model_eval_multitask, model_eval_test_multitask, align_pair_sents
 eps = 1e-7
 
 TQDM_DISABLE=False
@@ -54,6 +55,100 @@ def seed_everything(seed=11711):
 
 BERT_HIDDEN_SIZE = 768
 N_SENTIMENT_CLASSES = 5
+
+class BertCrossAttention(nn.Module):
+  def __init__(self, config):
+    super().__init__()
+
+    self.num_attention_heads = config.num_attention_heads
+    self.attention_head_size = int(config.hidden_size / config.num_attention_heads)
+    self.all_head_size = self.num_attention_heads * self.attention_head_size
+
+    # Initialize the linear transformation layers for key, value, query.
+    self.query = nn.Linear(config.hidden_size, self.all_head_size)
+    self.key = nn.Linear(config.hidden_size, self.all_head_size)
+    self.value = nn.Linear(config.hidden_size, self.all_head_size)
+    # This dropout is applied to normalized attention scores following the original
+    # implementation of transformer. Although it is a bit unusual, we empirically
+    # observe that it yields better performance.
+    self.dropout = nn.Dropout(config.attention_probs_dropout_prob)
+    self.pooler_dense = nn.Linear(config.hidden_size, config.hidden_size)
+    self.pooler_af = nn.Tanh()
+    self.resid_drop = nn.Dropout(0.1)
+    self.output_proj = nn.Linear(config.hidden_size, config.hidden_size)
+  def transform(self, x, linear_layer):
+    # The corresponding linear_layer of k, v, q are used to project the hidden_state (x).
+    bs, seq_len = x.shape[:2]
+    proj = linear_layer(x)
+    # Next, we need to produce multiple heads for the proj. This is done by spliting the
+    # hidden state to self.num_attention_heads, each of size self.attention_head_size.
+    proj = proj.view(bs, seq_len, self.num_attention_heads, self.attention_head_size)
+    # By proper transpose, we have proj of size [bs, num_attention_heads, seq_len, attention_head_size].
+    proj = proj.transpose(1, 2)
+    return proj
+
+  def attention(self, key, query, value, attention_mask):
+    # Each attention is calculated following eq. (1) of https://arxiv.org/pdf/1706.03762.pdf.
+    # Attention scores are calculated by multiplying the key and query to obtain
+    # a score matrix S of size [bs, num_attention_heads, seq_len, seq_len].
+    # S[*, i, j, k] represents the (unnormalized) attention score between the j-th and k-th
+    # token, given by i-th attention head.
+    # Before normalizing the scores, use the attention mask to mask out the padding token scores.
+    # Note that the attention mask distinguishes between non-padding tokens (with a value of 0)
+    # and padding tokens (with a value of a large negative number).
+
+    # Make sure to:
+    # - Normalize the scores with softmax.
+    # - Multiply the attention scores with the value to get back weighted values.
+    # - Before returning, concatenate multi-heads to recover the original shape:
+    #   [bs, seq_len, num_attention_heads * attention_head_size = hidden_size].
+
+    bs, num_heads, seq_len, head_size = query.size()
+    # (bs, num_heads, seq_len, head_size) x (bs, num_heads, head_size, seq_len) ->
+    # (bs, num_heads, seq_len, seq_len)
+    att = torch.matmul(query, key.transpose(-2, -1)) * (1.0 / math.sqrt(head_size))
+    # pay attention here, this may be implemented wrong
+    # https://huggingface.co/docs/transformers/glossary#attention-mask
+    # print(f'---------------')
+    # print(query.size())
+    # print(key.size())
+    # print(value.size())
+    # print(att.size())
+    # print(attention_mask.size())
+    att = att.masked_fill(attention_mask[:bs, :, :, :seq_len] < 0, float('-inf'))
+    att = F.softmax(att, dim=-1)
+    att = self.dropout(att)
+    # (bs, num_heads, seq_len, seq_len) x (bs, num_heads, seq_len, head_size)
+    # -> (bs, num_heads, seq_len, head_size)
+    y = torch.matmul(att, value)
+    y = y.transpose(1, 2).contiguous().view(bs, seq_len, num_heads * head_size)
+    y = self.resid_drop(self.output_proj(y))
+    # ### TODO
+    # raise NotImplementedError
+    return (y)
+
+
+  def forward(self, hidden_states_kv, hidden_states_q, attention_mask_kv):
+    """
+    hidden_states: [bs, seq_len, hidden_state]
+    attention_mask: [bs, 1, 1, seq_len]
+    output: [bs, seq_len, hidden_state]
+    """
+    # First, we have to generate the key, value, query for each token for multi-head attention
+    # using self.transform (more details inside the function).
+    # Size of *_layer is [bs, num_attention_heads, seq_len, attention_head_size].
+    key_layer = self.transform(hidden_states_kv, self.key)
+    value_layer = self.transform(hidden_states_kv, self.value)
+    query_layer = self.transform(hidden_states_q, self.query)
+    # Calculate the multi-head attention.
+    seq_attn = self.attention(key_layer, query_layer, value_layer, attention_mask_kv)
+    first_tk = seq_attn[:, 0]
+    first_tk = self.pooler_dense(first_tk)
+    first_tk = self.pooler_af(first_tk)
+    return {"seq_attn": seq_attn,
+            "CLS_attn": first_tk}
+
+
 
 
 class MultitaskBERT(nn.Module):
@@ -80,6 +175,7 @@ class MultitaskBERT(nn.Module):
         self.similarity_proj = nn.Linear(config.hidden_size, config.hidden_size * 4)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
         self.self_attn = BertSelfAttention(self.bert.config)
+        self.cross_attn = BertCrossAttention(self.bert.config)
         # self.agg_proj = nn.Linear(self.seq_length, 1)
         # ### TODO
         # raise NotImplementedError
@@ -176,6 +272,17 @@ class MultitaskBERT(nn.Module):
             repsentation = seq_encode.sum(dim=-2) / seq_encode.size()[-2]
         return(repsentation)
 
+    def get_bert_cross_attn(self, hidden_states_i, hidden_states_ii,
+                            attention_mask_i, attention_mask_ii, first_tk = True):
+        sent_encode_i = self.cross_attn(hidden_states_i, hidden_states_ii, attention_mask_i)
+        sent_encode_ii = self.cross_attn(hidden_states_ii, hidden_states_i, attention_mask_ii)
+        if first_tk:
+            tk_i = sent_encode_i['CLS_attn']
+            tk_ii = sent_encode_ii['CLS_attn']
+        else:
+            tk_i = self.get_mean_bert_output(sent_encode_i, attention_mask_ii, True)
+            tk_ii = self.get_mean_bert_output(sent_encode_ii, attention_mask_i, True)
+        return(tk_i, tk_ii)
 
     def predict_sentiment(self, input_ids, attention_mask):
         '''Given a batch of sentences, outputs logits for classifying sentiment.
@@ -191,6 +298,7 @@ class MultitaskBERT(nn.Module):
         # pred = F.softmax(proj, dim=-1)
 
         # attention
+        # sent_encode = self.dropout(sent_encode)
         extended_attention_mask: torch.Tensor = get_extended_attention_mask(attention_mask, self.bert.dtype)
         attn_seq = self.self_attn(sent_encode, extended_attention_mask)
         # attn = attn_seq[:, 0]
@@ -239,16 +347,41 @@ class MultitaskBERT(nn.Module):
         # TODO: attention
         # TODO: another dropout
         # TODO: bigger layer(s)
+        # # sent_encode_1 = self.forward(input_ids_1, attention_mask_1)
+        # # sent_encode_2 = self.forward(input_ids_2, attention_mask_2)
         # sent_encode_1 = self.forward(input_ids_1, attention_mask_1)
+        # sent_encode_1 = self.get_mean_bert_output(sent_encode_1, attention_mask_1, True)
+        # sent_encode_1 = self.dropout(sent_encode_1)
         # sent_encode_2 = self.forward(input_ids_2, attention_mask_2)
+        # sent_encode_2 = self.get_mean_bert_output(sent_encode_2, attention_mask_2, True)
+        # sent_encode_2 = self.dropout(sent_encode_2)
+        # proj_1 = self.similarity_proj(sent_encode_1)
+        # proj_2 = self.similarity_proj(sent_encode_2)
+        # product = proj_1 * proj_2
+        # pred = product.sum(dim=1)
+
+        extended_attention_mask_1: torch.Tensor = get_extended_attention_mask(attention_mask_1, self.bert.dtype)
+        extended_attention_mask_2: torch.Tensor = get_extended_attention_mask(attention_mask_2, self.bert.dtype)
         sent_encode_1 = self.forward(input_ids_1, attention_mask_1)
-        sent_encode_1 = self.get_mean_bert_output(sent_encode_1, attention_mask_1, True)
-        sent_encode_1 = self.dropout(sent_encode_1)
         sent_encode_2 = self.forward(input_ids_2, attention_mask_2)
-        sent_encode_2 = self.get_mean_bert_output(sent_encode_2, attention_mask_2, True)
-        sent_encode_2 = self.dropout(sent_encode_2)
-        proj_1 = self.similarity_proj(sent_encode_1)
-        proj_2 = self.similarity_proj(sent_encode_2)
+        # print(f'===========')
+        # print(sent_encode_1.size())
+        # print(sent_encode_2.size())
+        # print(attention_mask_1.size())
+        # print(attention_mask_2.size())
+        # print(attention_mask_1)
+        # print(attention_mask_2)
+
+        # if len(attention_mask_1)
+
+        # sent_encode_1 = self.dropout(sent_encode_1)
+        # sent_encode_2 = self.dropout(sent_encode_2)
+        tk_i, tk_ii = self.get_bert_cross_attn(sent_encode_1, sent_encode_2, extended_attention_mask_1,
+                                               extended_attention_mask_2, True)
+        tk_i = self.dropout(tk_i)
+        tk_ii = self.dropout(tk_ii)
+        proj_1 = self.similarity_proj(tk_i)
+        proj_2 = self.similarity_proj(tk_ii)
         product = proj_1 * proj_2
         pred = product.sum(dim=1)
         return(pred)
@@ -269,6 +402,7 @@ def save_model(model, optimizer, args, config, filepath):
 
     torch.save(save_info, filepath)
     print(f"save the model to {filepath}")
+
 
 
 def train_multitask(args):
@@ -337,22 +471,22 @@ def train_multitask(args):
         model.train()
         train_loss = 0
         num_batches = 0
-        for batch in tqdm(sst_train_dataloader, desc=f'train-sst-epoch-{epoch}', disable=TQDM_DISABLE):
-            b_ids, b_mask, b_labels = (batch['token_ids'],
-                                       batch['attention_mask'], batch['labels'])
-            b_ids = b_ids.to(device)
-            b_mask = b_mask.to(device)
-            b_labels = b_labels.to(device)
-
-            optimizer.zero_grad()
-            logits = model.predict_sentiment(b_ids, b_mask)
-            loss = F.cross_entropy(logits, b_labels.view(-1), reduction='sum') / args.batch_size
-
-            loss.backward()
-            optimizer.step()
-
-            train_loss += loss.item()
-            num_batches += 1
+        # for batch in tqdm(sst_train_dataloader, desc=f'train-sst-epoch-{epoch}', disable=TQDM_DISABLE):
+        #     b_ids, b_mask, b_labels = (batch['token_ids'],
+        #                                batch['attention_mask'], batch['labels'])
+        #     b_ids = b_ids.to(device)
+        #     b_mask = b_mask.to(device)
+        #     b_labels = b_labels.to(device)
+        #
+        #     optimizer.zero_grad()
+        #     logits = model.predict_sentiment(b_ids, b_mask)
+        #     loss = F.cross_entropy(logits, b_labels.view(-1), reduction='sum') / args.batch_size
+        #
+        #     loss.backward()
+        #     optimizer.step()
+        #
+        #     train_loss += loss.item()
+        #     num_batches += 1
 
         # for batch in tqdm(para_train_dataloader, desc=f'train-para-epoch-{epoch}', disable=TQDM_DISABLE):
         #     b_ids_1, b_mask_1, \
@@ -375,30 +509,42 @@ def train_multitask(args):
         #     train_loss += loss.item()
         #     num_batches += 1
 
-        # for batch in tqdm(sts_train_dataloader, desc=f'train-sts-epoch-{epoch}', disable=TQDM_DISABLE):
-        #     b_ids_1, b_mask_1, \
-        #     b_ids_2, b_mask_2, b_labels = (batch['token_ids_1'], batch['attention_mask_1'],
-        #                                    batch['token_ids_2'], batch['attention_mask_2'], batch['labels'])
-        #     b_ids_1 = b_ids_1.to(device)
-        #     b_mask_1 = b_mask_1.to(device)
-        #     b_ids_2 = b_ids_2.to(device)
-        #     b_mask_2 = b_mask_2.to(device)
-        #     b_labels = b_labels.float().to(device)
-        #
-        #     optimizer.zero_grad()
-        #     logits = model.predict_similarity(b_ids_1, b_mask_1, b_ids_2, b_mask_2)
-        #     x1 = logits.view(-1, args.batch_size)
-        #     x2 = b_labels.view(-1, args.batch_size)
-        #     # this is actually pearson correlation
-        #     loss = -cosSim(x1 - x1.mean(dim=1, keepdim=True),
-        #                    x2 - x2.mean(dim=1, keepdim=True)) / args.batch_size
-        #     # logits = model.predict_similarity(b_ids_1, b_mask_1, b_ids_2, b_mask_2).sigmoid() * 5.0
-        #     # loss = F.mse_loss(logits, b_labels.view(-1), reduction='sum') / args.batch_size
-        #     loss.backward()
-        #     optimizer.step()
-        #
-        #     train_loss += loss.item()
-        #     num_batches += 1
+        for batch in tqdm(sts_train_dataloader, desc=f'train-sts-epoch-{epoch}', disable=TQDM_DISABLE):
+            b_ids_1, b_mask_1, \
+            b_ids_2, b_mask_2, b_labels = (batch['token_ids_1'], batch['attention_mask_1'],
+                                           batch['token_ids_2'], batch['attention_mask_2'], batch['labels'])
+            b_ids_1, b_ids_2, b_mask_1, b_mask_2 = align_pair_sents(b_ids_1, b_ids_2, b_mask_1, b_mask_2)
+            b_ids_1 = b_ids_1.int().to(device)
+            b_mask_1 = b_mask_1.int().to(device)
+            b_ids_2 = b_ids_2.int().to(device)
+            b_mask_2 = b_mask_2.int().to(device)
+            b_labels = b_labels.int().float().to(device)
+
+
+            # print(f'------------')
+            # print(b_ids_1.size())
+            # print(b_ids_1)
+            # print(b_ids_2.size())
+            # print(b_ids_2)
+            # print(b_mask_1.size())
+            # print(b_mask_1)
+            # print(b_mask_2.size())
+            # print(b_mask_2)
+
+            optimizer.zero_grad()
+            logits = model.predict_similarity(b_ids_1, b_mask_1, b_ids_2, b_mask_2)
+            x1 = logits.view(-1, args.batch_size)
+            x2 = b_labels.view(-1, args.batch_size)
+            # this is actually pearson correlation
+            loss = -cosSim(x1 - x1.mean(dim=1, keepdim=True),
+                           x2 - x2.mean(dim=1, keepdim=True)) / args.batch_size
+            # logits = model.predict_similarity(b_ids_1, b_mask_1, b_ids_2, b_mask_2).sigmoid() * 5.0
+            # loss = F.mse_loss(logits, b_labels.view(-1), reduction='sum') / args.batch_size
+            loss.backward()
+            optimizer.step()
+
+            train_loss += loss.item()
+            num_batches += 1
 
         train_loss = train_loss / (num_batches)
 
@@ -562,9 +708,9 @@ if __name__ == "__main__":
     args.filepath = f'{args.option}-{args.epochs}-{args.lr}-multitask.pt' # Save path.
     seed_everything(args.seed)  # Fix the seed for reproducibility.
     train_start = time.time()
-    old_stdout = sys.stdout
-    log_file = open("message" + args.option + str(int(train_start)) +".log", "w")
-    sys.stdout = log_file
+    # old_stdout = sys.stdout
+    # log_file = open("message" + args.option + str(int(train_start)) +".log", "w")
+    # sys.stdout = log_file
 
     train_multitask(args)
     test_start = time.time()
@@ -573,5 +719,5 @@ if __name__ == "__main__":
     test_end = time.time()
     print(f'Testing cost {int(test_end - test_start)} seconds')
 
-    sys.stdout = old_stdout
-    log_file.close()
+    # sys.stdout = old_stdout
+    # log_file.close()

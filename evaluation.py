@@ -15,6 +15,18 @@ import numpy as np
 
 TQDM_DISABLE = False
 
+def align_pair_sents(b_ids_1, b_ids_2, b_masks_1, b_masks_2):
+    batch_size_1, seq_size_1 = b_ids_1.size()
+    batch_size_2, seq_size_2 = b_ids_2.size()
+    if seq_size_1 > seq_size_2:
+        zeros = torch.zeros(batch_size_1, seq_size_1 - seq_size_2)
+        b_ids_2 = torch.cat((b_ids_2, zeros), 1)
+        b_masks_2 = torch.cat((b_masks_2, zeros), 1)
+    elif seq_size_1 < seq_size_2:
+        zeros = torch.zeros(batch_size_1, seq_size_2 - seq_size_1)
+        b_ids_1 = torch.cat((b_ids_1, zeros), 1)
+        b_masks_1 = torch.cat((b_masks_1, zeros), 1)
+    return(b_ids_1, b_ids_2, b_masks_1, b_masks_2)
 
 # Evaluate multitask model on SST only.
 def model_eval_sst(dataloader, model, device):
@@ -50,7 +62,8 @@ def model_eval_sst(dataloader, model, device):
 def model_eval_multitask(sentiment_dataloader,
                          paraphrase_dataloader,
                          sts_dataloader,
-                         model, device):
+                         model, device,
+                         cross_attn = True):
     model.eval()  # Switch to eval model, will turn off randomness like dropout.
 
     with torch.no_grad():
@@ -110,11 +123,12 @@ def model_eval_multitask(sentiment_dataloader,
              b_labels, b_sent_ids) = (batch['token_ids_1'], batch['attention_mask_1'],
                           batch['token_ids_2'], batch['attention_mask_2'],
                           batch['labels'], batch['sent_ids'])
-
-            b_ids1 = b_ids1.to(device)
-            b_mask1 = b_mask1.to(device)
-            b_ids2 = b_ids2.to(device)
-            b_mask2 = b_mask2.to(device)
+            if cross_attn:
+                b_ids1, b_ids2, b_mask1, b_mask2 = align_pair_sents(b_ids1, b_ids2, b_mask1, b_mask2)
+            b_ids1 = b_ids1.int().to(device)
+            b_mask1 = b_mask1.int().to(device)
+            b_ids2 = b_ids2.int().to(device)
+            b_mask2 = b_mask2.int().to(device)
 
             logits = model.predict_similarity(b_ids1, b_mask1, b_ids2, b_mask2)
             y_hat = logits.flatten().cpu().numpy()
@@ -139,7 +153,8 @@ def model_eval_multitask(sentiment_dataloader,
 def model_eval_test_multitask(sentiment_dataloader,
                          paraphrase_dataloader,
                          sts_dataloader,
-                         model, device):
+                         model, device,
+                         cross_attn = True):
     model.eval()  # Switch to eval model, will turn off randomness like dropout.
 
     with torch.no_grad():
@@ -188,11 +203,12 @@ def model_eval_test_multitask(sentiment_dataloader,
              b_sent_ids) = (batch['token_ids_1'], batch['attention_mask_1'],
                           batch['token_ids_2'], batch['attention_mask_2'],
                           batch['sent_ids'])
-
-            b_ids1 = b_ids1.to(device)
-            b_mask1 = b_mask1.to(device)
-            b_ids2 = b_ids2.to(device)
-            b_mask2 = b_mask2.to(device)
+            if cross_attn:
+                b_ids1, b_ids2, b_mask1, b_mask2 = align_pair_sents(b_ids1, b_ids2, b_mask1, b_mask2)
+            b_ids1 = b_ids1.int().to(device)
+            b_mask1 = b_mask1.int().to(device)
+            b_ids2 = b_ids2.int().to(device)
+            b_mask2 = b_mask2.int().to(device)
 
             logits = model.predict_similarity(b_ids1, b_mask1, b_ids2, b_mask2)
             y_hat = logits.flatten().cpu().numpy()
