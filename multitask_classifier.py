@@ -88,33 +88,12 @@ class BertCrossAttention(nn.Module):
     return proj
 
   def attention(self, key, query, value, attention_mask):
-    # Each attention is calculated following eq. (1) of https://arxiv.org/pdf/1706.03762.pdf.
-    # Attention scores are calculated by multiplying the key and query to obtain
-    # a score matrix S of size [bs, num_attention_heads, seq_len, seq_len].
-    # S[*, i, j, k] represents the (unnormalized) attention score between the j-th and k-th
-    # token, given by i-th attention head.
-    # Before normalizing the scores, use the attention mask to mask out the padding token scores.
-    # Note that the attention mask distinguishes between non-padding tokens (with a value of 0)
-    # and padding tokens (with a value of a large negative number).
-
-    # Make sure to:
-    # - Normalize the scores with softmax.
-    # - Multiply the attention scores with the value to get back weighted values.
-    # - Before returning, concatenate multi-heads to recover the original shape:
-    #   [bs, seq_len, num_attention_heads * attention_head_size = hidden_size].
-
     bs, num_heads, seq_len, head_size = query.size()
     # (bs, num_heads, seq_len, head_size) x (bs, num_heads, head_size, seq_len) ->
     # (bs, num_heads, seq_len, seq_len)
     att = torch.matmul(query, key.transpose(-2, -1)) * (1.0 / math.sqrt(head_size))
     # pay attention here, this may be implemented wrong
     # https://huggingface.co/docs/transformers/glossary#attention-mask
-    # print(f'---------------')
-    # print(query.size())
-    # print(key.size())
-    # print(value.size())
-    # print(att.size())
-    # print(attention_mask.size())
     att = att.masked_fill(attention_mask[:bs, :, :, :seq_len] < 0, float('-inf'))
     att = F.softmax(att, dim=-1)
     att = self.dropout(att)
@@ -123,8 +102,6 @@ class BertCrossAttention(nn.Module):
     y = torch.matmul(att, value)
     y = y.transpose(1, 2).contiguous().view(bs, seq_len, num_heads * head_size)
     y = self.resid_drop(self.output_proj(y))
-    # ### TODO
-    # raise NotImplementedError
     return (y)
 
 
@@ -134,13 +111,9 @@ class BertCrossAttention(nn.Module):
     attention_mask: [bs, 1, 1, seq_len]
     output: [bs, seq_len, hidden_state]
     """
-    # First, we have to generate the key, value, query for each token for multi-head attention
-    # using self.transform (more details inside the function).
-    # Size of *_layer is [bs, num_attention_heads, seq_len, attention_head_size].
     key_layer = self.transform(hidden_states_kv, self.key)
     value_layer = self.transform(hidden_states_kv, self.value)
     query_layer = self.transform(hidden_states_q, self.query)
-    # Calculate the multi-head attention.
     seq_attn = self.attention(key_layer, query_layer, value_layer, attention_mask_kv)
     first_tk = seq_attn[:, 0]
     first_tk = self.pooler_dense(first_tk)
@@ -293,16 +266,19 @@ class MultitaskBERT(nn.Module):
 
         # TODO: attention
         # TODO: another dropout
-        sent_encode = self.forward(input_ids, attention_mask)
+
+        # # direct project without attentions
+        # sent_encode = self.forward(input_ids, attention_mask)
         # proj = self.sentiment_proj(sent_encode)
         # pred = F.softmax(proj, dim=-1)
 
-        # attention
+        # project using attentions
+        sent_encode = self.forward(input_ids, attention_mask)
         # sent_encode = self.dropout(sent_encode)
         extended_attention_mask: torch.Tensor = get_extended_attention_mask(attention_mask, self.bert.dtype)
         attn_seq = self.self_attn(sent_encode, extended_attention_mask)
-        # attn = attn_seq[:, 0]
-        attn = self.get_mean_bert_output(attn_seq, attention_mask, True)
+        attn = attn_seq[:, 0]
+        # attn = self.get_mean_bert_output(attn_seq, attention_mask, True)
         attn = self.dropout(attn)
         proj = self.sentiment_proj(attn)
         pred = F.softmax(proj, dim=-1)
@@ -347,6 +323,8 @@ class MultitaskBERT(nn.Module):
         # TODO: attention
         # TODO: another dropout
         # TODO: bigger layer(s)
+
+        # # direct project without attentions
         # # sent_encode_1 = self.forward(input_ids_1, attention_mask_1)
         # # sent_encode_2 = self.forward(input_ids_2, attention_mask_2)
         # sent_encode_1 = self.forward(input_ids_1, attention_mask_1)
@@ -360,20 +338,11 @@ class MultitaskBERT(nn.Module):
         # product = proj_1 * proj_2
         # pred = product.sum(dim=1)
 
+        # project using attentions
         extended_attention_mask_1: torch.Tensor = get_extended_attention_mask(attention_mask_1, self.bert.dtype)
         extended_attention_mask_2: torch.Tensor = get_extended_attention_mask(attention_mask_2, self.bert.dtype)
         sent_encode_1 = self.forward(input_ids_1, attention_mask_1)
         sent_encode_2 = self.forward(input_ids_2, attention_mask_2)
-        # print(f'===========')
-        # print(sent_encode_1.size())
-        # print(sent_encode_2.size())
-        # print(attention_mask_1.size())
-        # print(attention_mask_2.size())
-        # print(attention_mask_1)
-        # print(attention_mask_2)
-
-        # if len(attention_mask_1)
-
         # sent_encode_1 = self.dropout(sent_encode_1)
         # sent_encode_2 = self.dropout(sent_encode_2)
         tk_i, tk_ii = self.get_bert_cross_attn(sent_encode_1, sent_encode_2, extended_attention_mask_1,
