@@ -23,7 +23,7 @@ from torch import nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
-from bert import BertModel, BertSelfAttention
+from bert import BertModel, BertSelfAttention, BertLayer
 from optimizer import AdamW
 from tqdm import tqdm
 from utils import *
@@ -147,7 +147,8 @@ class MultitaskBERT(nn.Module):
         self.paraphrase_proj = nn.Linear(config.hidden_size, config.hidden_size)
         self.similarity_proj = nn.Linear(config.hidden_size, config.hidden_size * 4)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
-        self.self_attn = BertSelfAttention(self.bert.config)
+        # self.self_attn = BertSelfAttention(self.bert.config)
+        self.self_attn = BertLayer(self.bert.config)
         self.cross_attn = BertCrossAttention(self.bert.config)
         # self.agg_proj = nn.Linear(self.seq_length, 1)
         # ### TODO
@@ -440,22 +441,22 @@ def train_multitask(args):
         model.train()
         train_loss = 0
         num_batches = 0
-        # for batch in tqdm(sst_train_dataloader, desc=f'train-sst-epoch-{epoch}', disable=TQDM_DISABLE):
-        #     b_ids, b_mask, b_labels = (batch['token_ids'],
-        #                                batch['attention_mask'], batch['labels'])
-        #     b_ids = b_ids.to(device)
-        #     b_mask = b_mask.to(device)
-        #     b_labels = b_labels.to(device)
-        #
-        #     optimizer.zero_grad()
-        #     logits = model.predict_sentiment(b_ids, b_mask)
-        #     loss = F.cross_entropy(logits, b_labels.view(-1), reduction='sum') / args.batch_size
-        #
-        #     loss.backward()
-        #     optimizer.step()
-        #
-        #     train_loss += loss.item()
-        #     num_batches += 1
+        for batch in tqdm(sst_train_dataloader, desc=f'train-sst-epoch-{epoch}', disable=TQDM_DISABLE):
+            b_ids, b_mask, b_labels = (batch['token_ids'],
+                                       batch['attention_mask'], batch['labels'])
+            b_ids = b_ids.to(device)
+            b_mask = b_mask.to(device)
+            b_labels = b_labels.to(device)
+
+            optimizer.zero_grad()
+            logits = model.predict_sentiment(b_ids, b_mask)
+            loss = F.cross_entropy(logits, b_labels.view(-1), reduction='sum') / args.batch_size
+
+            loss.backward()
+            optimizer.step()
+
+            train_loss += loss.item()
+            num_batches += 1
 
         # for batch in tqdm(para_train_dataloader, desc=f'train-para-epoch-{epoch}', disable=TQDM_DISABLE):
         #     b_ids_1, b_mask_1, \
@@ -478,42 +479,31 @@ def train_multitask(args):
         #     train_loss += loss.item()
         #     num_batches += 1
 
-        for batch in tqdm(sts_train_dataloader, desc=f'train-sts-epoch-{epoch}', disable=TQDM_DISABLE):
-            b_ids_1, b_mask_1, \
-            b_ids_2, b_mask_2, b_labels = (batch['token_ids_1'], batch['attention_mask_1'],
-                                           batch['token_ids_2'], batch['attention_mask_2'], batch['labels'])
-            b_ids_1, b_ids_2, b_mask_1, b_mask_2 = align_pair_sents(b_ids_1, b_ids_2, b_mask_1, b_mask_2)
-            b_ids_1 = b_ids_1.int().to(device)
-            b_mask_1 = b_mask_1.int().to(device)
-            b_ids_2 = b_ids_2.int().to(device)
-            b_mask_2 = b_mask_2.int().to(device)
-            b_labels = b_labels.int().float().to(device)
-
-
-            # print(f'------------')
-            # print(b_ids_1.size())
-            # print(b_ids_1)
-            # print(b_ids_2.size())
-            # print(b_ids_2)
-            # print(b_mask_1.size())
-            # print(b_mask_1)
-            # print(b_mask_2.size())
-            # print(b_mask_2)
-
-            optimizer.zero_grad()
-            logits = model.predict_similarity(b_ids_1, b_mask_1, b_ids_2, b_mask_2)
-            x1 = logits.view(-1, args.batch_size)
-            x2 = b_labels.view(-1, args.batch_size)
-            # this is actually pearson correlation
-            loss = -cosSim(x1 - x1.mean(dim=1, keepdim=True),
-                           x2 - x2.mean(dim=1, keepdim=True)) / args.batch_size
-            # logits = model.predict_similarity(b_ids_1, b_mask_1, b_ids_2, b_mask_2).sigmoid() * 5.0
-            # loss = F.mse_loss(logits, b_labels.view(-1), reduction='sum') / args.batch_size
-            loss.backward()
-            optimizer.step()
-
-            train_loss += loss.item()
-            num_batches += 1
+        # for batch in tqdm(sts_train_dataloader, desc=f'train-sts-epoch-{epoch}', disable=TQDM_DISABLE):
+        #     b_ids_1, b_mask_1, \
+        #     b_ids_2, b_mask_2, b_labels = (batch['token_ids_1'], batch['attention_mask_1'],
+        #                                    batch['token_ids_2'], batch['attention_mask_2'], batch['labels'])
+        #     b_ids_1, b_ids_2, b_mask_1, b_mask_2 = align_pair_sents(b_ids_1, b_ids_2, b_mask_1, b_mask_2)
+        #     b_ids_1 = b_ids_1.int().to(device)
+        #     b_mask_1 = b_mask_1.int().to(device)
+        #     b_ids_2 = b_ids_2.int().to(device)
+        #     b_mask_2 = b_mask_2.int().to(device)
+        #     b_labels = b_labels.int().float().to(device)
+        #
+        #     optimizer.zero_grad()
+        #     logits = model.predict_similarity(b_ids_1, b_mask_1, b_ids_2, b_mask_2)
+        #     x1 = logits.view(-1, args.batch_size)
+        #     x2 = b_labels.view(-1, args.batch_size)
+        #     # this is actually pearson correlation
+        #     loss = -cosSim(x1 - x1.mean(dim=1, keepdim=True),
+        #                    x2 - x2.mean(dim=1, keepdim=True)) / args.batch_size
+        #     # logits = model.predict_similarity(b_ids_1, b_mask_1, b_ids_2, b_mask_2).sigmoid() * 5.0
+        #     # loss = F.mse_loss(logits, b_labels.view(-1), reduction='sum') / args.batch_size
+        #     loss.backward()
+        #     optimizer.step()
+        #
+        #     train_loss += loss.item()
+        #     num_batches += 1
 
         train_loss = train_loss / (num_batches)
 
