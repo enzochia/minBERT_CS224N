@@ -40,7 +40,6 @@ from evaluation import model_eval_sst, model_eval_multitask, model_eval_test_mul
 eps = 1e-7
 
 TQDM_DISABLE=False
-NUM_HIDDEN_LAYERS_SENTIMENT = 1
 
 # Fix the random seed.
 def seed_everything(seed=11711):
@@ -55,6 +54,8 @@ def seed_everything(seed=11711):
 
 BERT_HIDDEN_SIZE = 768
 N_SENTIMENT_CLASSES = 5
+NUM_HIDDEN_LAYERS_SST = 1
+NUM_HIDDEN_LAYERS_STS = 1
 
 class BertCrossAttention(nn.Module):
   def __init__(self, config):
@@ -115,14 +116,74 @@ class BertCrossAttention(nn.Module):
     value_layer = self.transform(hidden_states_kv, self.value)
     query_layer = self.transform(hidden_states_q, self.query)
     seq_attn = self.attention(key_layer, query_layer, value_layer, attention_mask_kv)
-    first_tk = seq_attn[:, 0]
-    first_tk = self.pooler_dense(first_tk)
-    first_tk = self.pooler_af(first_tk)
-    return {"seq_attn": seq_attn,
-            "CLS_attn": first_tk}
+    # first_tk = seq_attn[:, 0]
+    # first_tk = self.pooler_dense(first_tk)
+    # first_tk = self.pooler_af(first_tk)
+    # return {"seq_attn": seq_attn,
+    #         "CLS_attn": first_tk}
+    return(seq_attn)
+
+class BertCrossAttnLayer(nn.Module):
+  def __init__(self, config):
+    super().__init__()
+    # Multi-head attention.
+    # self.self_attention = BertSelfAttention(config)
+    self.cross_attention = BertCrossAttention(config)
+    # Add-norm for multi-head attention.
+    self.attention_dense = nn.Linear(config.hidden_size, config.hidden_size)
+    self.attention_layer_norm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+    self.attention_dropout = nn.Dropout(config.hidden_dropout_prob)
+    # Feed forward.
+    self.interm_dense = nn.Linear(config.hidden_size, config.intermediate_size)
+    self.interm_af = F.gelu
+    # Add-norm for feed forward.
+    self.out_dense = nn.Linear(config.intermediate_size, config.hidden_size)
+    self.out_layer_norm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+    self.out_dropout = nn.Dropout(config.hidden_dropout_prob)
+
+  def add_norm(self, input, output, dense_layer, dropout, ln_layer):
+    """
+    This function is applied after the multi-head attention layer or the feed forward layer.
+    input: the input of the previous layer
+    output: the output of the previous layer
+    dense_layer: used to transform the output
+    dropout: the dropout to be applied
+    ln_layer: the layer norm to be applied
+    """
+    output = dropout(dense_layer(output))
+    output = ln_layer(input + output)
+    return(output)
 
 
-
+  def forward(self, hidden_states_1, hidden_states_2,
+              attention_mask_1, attention_mask_2):
+    """
+    hidden_states: either from the embedding layer (first BERT layer) or from the previous BERT layer
+    as shown in the left of Figure 1 of https://arxiv.org/pdf/1706.03762.pdf.
+    Each block consists of:
+    1. A multi-head attention layer (BertSelfAttention).
+    2. An add-norm operation that takes the input and output of the multi-head attention layer.
+    3. A feed forward layer.
+    4. An add-norm operation that takes the input and output of the feed forward layer.
+    """
+    # attn_value = self.self_attention(hidden_states, attention_mask)
+    # sent_encode_i = self.cross_attn(hidden_states_i, hidden_states_ii, attention_mask_i)
+    # sent_encode_ii = self.cross_attn(hidden_states_ii, hidden_states_i, attention_mask_ii)
+    attn_value_1 = self.cross_attention(hidden_states_1, hidden_states_2, attention_mask_1)
+    attn_value_2 = self.cross_attention(hidden_states_2, hidden_states_1, attention_mask_2)
+    attn_value_1 = self.add_norm(hidden_states_1, attn_value_1, self.attention_dense,
+                                 self.attention_dropout, self.attention_layer_norm)
+    attn_value_2 = self.add_norm(hidden_states_2, attn_value_2, self.attention_dense,
+                                 self.attention_dropout, self.attention_layer_norm)
+    output_1 = self.interm_dense(attn_value_1)
+    output_1 = self.interm_af(output_1)
+    output_1 = self.add_norm(attn_value_1, output_1, self.out_dense,
+                             self.out_dropout, self.out_layer_norm)
+    output_2 = self.interm_dense(attn_value_2)
+    output_2 = self.interm_af(output_2)
+    output_2 = self.add_norm(attn_value_2, output_2, self.out_dense,
+                             self.out_dropout, self.out_layer_norm)
+    return(output_1, output_2)
 
 class MultitaskBERT(nn.Module):
     '''
@@ -148,7 +209,10 @@ class MultitaskBERT(nn.Module):
         self.similarity_proj = nn.Linear(config.hidden_size, config.hidden_size * 4)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
         # self.self_attn = BertSelfAttention(self.bert.config)
-        self.bert_layers = nn.ModuleList([BertLayer(self.bert.config) for _ in range(NUM_HIDDEN_LAYERS_SENTIMENT)])
+        self.bert_layers_sst = nn.ModuleList([BertLayer(self.bert.config)
+                                              for _ in range(NUM_HIDDEN_LAYERS_SST)])
+        self.bert_layers_sts = nn.ModuleList([BertCrossAttnLayer(self.bert.config)
+                                              for _ in range(NUM_HIDDEN_LAYERS_STS)])
         self.cross_attn = BertCrossAttention(self.bert.config)
         # self.agg_proj = nn.Linear(self.seq_length, 1)
         # ### TODO
@@ -207,7 +271,14 @@ class MultitaskBERT(nn.Module):
                         attention:
                         sst (pooler).          on vm ii  -- 03/09 am
                         sst (seq).             on vm iv  -- 03/09 pm
-        
+                        sst (1 BertLayer, no 
+                             final dropout)    on vm ii  -- 03/10 pm
+                        sst (2 BertLayer, no 
+                             final dropout)    on vm iii -- 03/10 pm      
+                        sst (4 BertLayer, no 
+                             final dropout)    on vm iv  -- 03/10 pm                  
+                        sst (8 BertLayer, no 
+                             final dropout)    on vm v   -- 03/10 pm            
         """
         # The final BERT embedding is the hidden state of [CLS] token (the first token)
         # Here, you can start by just returning the embeddings straight from BERT.
@@ -251,8 +322,10 @@ class MultitaskBERT(nn.Module):
         sent_encode_i = self.cross_attn(hidden_states_i, hidden_states_ii, attention_mask_i)
         sent_encode_ii = self.cross_attn(hidden_states_ii, hidden_states_i, attention_mask_ii)
         if first_tk:
-            tk_i = sent_encode_i['CLS_attn']
-            tk_ii = sent_encode_ii['CLS_attn']
+            # tk_i = sent_encode_i['CLS_attn']
+            # tk_ii = sent_encode_ii['CLS_attn']
+            tk_i = sent_encode_i[:, 0]
+            tk_ii = sent_encode_ii[:, 0]
         else:
             tk_i = self.get_mean_bert_output(sent_encode_i, attention_mask_ii, True)
             tk_ii = self.get_mean_bert_output(sent_encode_ii, attention_mask_i, True)
@@ -278,7 +351,7 @@ class MultitaskBERT(nn.Module):
         # sent_encode = self.dropout(sent_encode)
         extended_attention_mask: torch.Tensor = get_extended_attention_mask(attention_mask, self.bert.dtype)
         # Pass the hidden states through the encoder layers.
-        for i, layer_module in enumerate(self.bert_layers):
+        for i, layer_module in enumerate(self.bert_layers_sst):
             # Feed the encoding from the last bert_layer to the next.
             sent_encode = layer_module(sent_encode, extended_attention_mask)
         attn = sent_encode[:, 0]
@@ -349,10 +422,17 @@ class MultitaskBERT(nn.Module):
         sent_encode_2 = self.forward(input_ids_2, attention_mask_2)
         # sent_encode_1 = self.dropout(sent_encode_1)
         # sent_encode_2 = self.dropout(sent_encode_2)
+
+        for i, layer_module in enumerate(self.bert_layers_sts):
+            # Feed the encoding from the last bert_layer to the next.
+            sent_encode_1, sent_encode_2 = layer_module(sent_encode_1, sent_encode_2,
+                                                        extended_attention_mask_1, extended_attention_mask_2)
         tk_i, tk_ii = self.get_bert_cross_attn(sent_encode_1, sent_encode_2, extended_attention_mask_1,
                                                extended_attention_mask_2, True)
         tk_i = self.dropout(tk_i)
         tk_ii = self.dropout(tk_ii)
+        # tk_i = self.dropout(tk_i)
+        # tk_ii = self.dropout(tk_ii)
         proj_1 = self.similarity_proj(tk_i)
         proj_2 = self.similarity_proj(tk_ii)
         product = proj_1 * proj_2
@@ -444,22 +524,22 @@ def train_multitask(args):
         model.train()
         train_loss = 0
         num_batches = 0
-        for batch in tqdm(sst_train_dataloader, desc=f'train-sst-epoch-{epoch}', disable=TQDM_DISABLE):
-            b_ids, b_mask, b_labels = (batch['token_ids'],
-                                       batch['attention_mask'], batch['labels'])
-            b_ids = b_ids.to(device)
-            b_mask = b_mask.to(device)
-            b_labels = b_labels.to(device)
-
-            optimizer.zero_grad()
-            logits = model.predict_sentiment(b_ids, b_mask)
-            loss = F.cross_entropy(logits, b_labels.view(-1), reduction='sum') / args.batch_size
-
-            loss.backward()
-            optimizer.step()
-
-            train_loss += loss.item()
-            num_batches += 1
+        # for batch in tqdm(sst_train_dataloader, desc=f'train-sst-epoch-{epoch}', disable=TQDM_DISABLE):
+        #     b_ids, b_mask, b_labels = (batch['token_ids'],
+        #                                batch['attention_mask'], batch['labels'])
+        #     b_ids = b_ids.to(device)
+        #     b_mask = b_mask.to(device)
+        #     b_labels = b_labels.to(device)
+        #
+        #     optimizer.zero_grad()
+        #     logits = model.predict_sentiment(b_ids, b_mask)
+        #     loss = F.cross_entropy(logits, b_labels.view(-1), reduction='sum') / args.batch_size
+        #
+        #     loss.backward()
+        #     optimizer.step()
+        #
+        #     train_loss += loss.item()
+        #     num_batches += 1
 
         # for batch in tqdm(para_train_dataloader, desc=f'train-para-epoch-{epoch}', disable=TQDM_DISABLE):
         #     b_ids_1, b_mask_1, \
@@ -482,31 +562,31 @@ def train_multitask(args):
         #     train_loss += loss.item()
         #     num_batches += 1
 
-        # for batch in tqdm(sts_train_dataloader, desc=f'train-sts-epoch-{epoch}', disable=TQDM_DISABLE):
-        #     b_ids_1, b_mask_1, \
-        #     b_ids_2, b_mask_2, b_labels = (batch['token_ids_1'], batch['attention_mask_1'],
-        #                                    batch['token_ids_2'], batch['attention_mask_2'], batch['labels'])
-        #     b_ids_1, b_ids_2, b_mask_1, b_mask_2 = align_pair_sents(b_ids_1, b_ids_2, b_mask_1, b_mask_2)
-        #     b_ids_1 = b_ids_1.int().to(device)
-        #     b_mask_1 = b_mask_1.int().to(device)
-        #     b_ids_2 = b_ids_2.int().to(device)
-        #     b_mask_2 = b_mask_2.int().to(device)
-        #     b_labels = b_labels.int().float().to(device)
-        #
-        #     optimizer.zero_grad()
-        #     logits = model.predict_similarity(b_ids_1, b_mask_1, b_ids_2, b_mask_2)
-        #     x1 = logits.view(-1, args.batch_size)
-        #     x2 = b_labels.view(-1, args.batch_size)
-        #     # this is actually pearson correlation
-        #     loss = -cosSim(x1 - x1.mean(dim=1, keepdim=True),
-        #                    x2 - x2.mean(dim=1, keepdim=True)) / args.batch_size
-        #     # logits = model.predict_similarity(b_ids_1, b_mask_1, b_ids_2, b_mask_2).sigmoid() * 5.0
-        #     # loss = F.mse_loss(logits, b_labels.view(-1), reduction='sum') / args.batch_size
-        #     loss.backward()
-        #     optimizer.step()
-        #
-        #     train_loss += loss.item()
-        #     num_batches += 1
+        for batch in tqdm(sts_train_dataloader, desc=f'train-sts-epoch-{epoch}', disable=TQDM_DISABLE):
+            b_ids_1, b_mask_1, \
+            b_ids_2, b_mask_2, b_labels = (batch['token_ids_1'], batch['attention_mask_1'],
+                                           batch['token_ids_2'], batch['attention_mask_2'], batch['labels'])
+            b_ids_1, b_ids_2, b_mask_1, b_mask_2 = align_pair_sents(b_ids_1, b_ids_2, b_mask_1, b_mask_2)
+            b_ids_1 = b_ids_1.int().to(device)
+            b_mask_1 = b_mask_1.int().to(device)
+            b_ids_2 = b_ids_2.int().to(device)
+            b_mask_2 = b_mask_2.int().to(device)
+            b_labels = b_labels.int().float().to(device)
+
+            optimizer.zero_grad()
+            logits = model.predict_similarity(b_ids_1, b_mask_1, b_ids_2, b_mask_2)
+            x1 = logits.view(-1, args.batch_size)
+            x2 = b_labels.view(-1, args.batch_size)
+            # this is actually pearson correlation
+            loss = -cosSim(x1 - x1.mean(dim=1, keepdim=True),
+                           x2 - x2.mean(dim=1, keepdim=True)) / args.batch_size
+            # logits = model.predict_similarity(b_ids_1, b_mask_1, b_ids_2, b_mask_2).sigmoid() * 5.0
+            # loss = F.mse_loss(logits, b_labels.view(-1), reduction='sum') / args.batch_size
+            loss.backward()
+            optimizer.step()
+
+            train_loss += loss.item()
+            num_batches += 1
 
         train_loss = train_loss / (num_batches)
 
@@ -670,9 +750,9 @@ if __name__ == "__main__":
     args.filepath = f'{args.option}-{args.epochs}-{args.lr}-multitask.pt' # Save path.
     seed_everything(args.seed)  # Fix the seed for reproducibility.
     train_start = time.time()
-    # old_stdout = sys.stdout
-    # log_file = open("message" + args.option + str(int(train_start)) +".log", "w")
-    # sys.stdout = log_file
+    old_stdout = sys.stdout
+    log_file = open("message" + args.option + str(int(train_start)) +".log", "w")
+    sys.stdout = log_file
 
     train_multitask(args)
     test_start = time.time()
@@ -681,5 +761,5 @@ if __name__ == "__main__":
     test_end = time.time()
     print(f'Testing cost {int(test_end - test_start)} seconds')
 
-    # sys.stdout = old_stdout
-    # log_file.close()
+    sys.stdout = old_stdout
+    log_file.close()
