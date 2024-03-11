@@ -40,7 +40,7 @@ from evaluation import model_eval_sst, model_eval_multitask, model_eval_test_mul
 eps = 1e-7
 
 TQDM_DISABLE=False
-
+NUM_HIDDEN_LAYERS_SENTIMENT = 1
 
 # Fix the random seed.
 def seed_everything(seed=11711):
@@ -148,7 +148,7 @@ class MultitaskBERT(nn.Module):
         self.similarity_proj = nn.Linear(config.hidden_size, config.hidden_size * 4)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
         # self.self_attn = BertSelfAttention(self.bert.config)
-        self.self_attn = BertLayer(self.bert.config)
+        self.bert_layers = nn.ModuleList([BertLayer(self.bert.config) for _ in range(NUM_HIDDEN_LAYERS_SENTIMENT)])
         self.cross_attn = BertCrossAttention(self.bert.config)
         # self.agg_proj = nn.Linear(self.seq_length, 1)
         # ### TODO
@@ -277,10 +277,13 @@ class MultitaskBERT(nn.Module):
         sent_encode = self.forward(input_ids, attention_mask)
         # sent_encode = self.dropout(sent_encode)
         extended_attention_mask: torch.Tensor = get_extended_attention_mask(attention_mask, self.bert.dtype)
-        attn_seq = self.self_attn(sent_encode, extended_attention_mask)
-        attn = attn_seq[:, 0]
+        # Pass the hidden states through the encoder layers.
+        for i, layer_module in enumerate(self.bert_layers):
+            # Feed the encoding from the last bert_layer to the next.
+            sent_encode = layer_module(sent_encode, extended_attention_mask)
+        attn = sent_encode[:, 0]
         # attn = self.get_mean_bert_output(attn_seq, attention_mask, True)
-        attn = self.dropout(attn)
+        # attn = self.dropout(attn)
         proj = self.sentiment_proj(attn)
         pred = F.softmax(proj, dim=-1)
         return (pred)
