@@ -244,7 +244,13 @@ class MultitaskBERT(nn.Module):
         first token                             finetune            0.504                0.595         0.587        1886 + 33475 + 1822
         task specific finetune                  pretrain            0.460                0.388         0.643        819 + 13259 + 837
         mean of seq                             finetune            0.515                0.550         0.854        1829 + 33475 + 1715
-                                                
+        
+        attn, no init, no dropout               pretrain            0.253 (2x attn)      0.         0.        1096 +  + 
+        mean of seq                             finetune            0.509 (2x attn)      0.         0.        2152 +  + 
+        attn, init, dropout                     pretrain            0.253 (2x attn)      0.         0.        1077 +  + 
+        mean of seq                             finetune            0.531 (2x attn)      0.         0.        2133 +  +         
+        attn, init, no dropout                  pretrain            0.262 (2x attn)      0.         0.        1099 +  + 
+        mean of seq                             finetune            0.539 (2x attn)      0.         0.        2161 +  +                                                     
         
         Note: 20240307: order: sst, sts, para. on vm ii  -- 03/07 am
                         order: para, sst, sts. on vm iii -- 03/07 am
@@ -379,7 +385,7 @@ class MultitaskBERT(nn.Module):
             sent_encode = layer_module(sent_encode, extended_attention_mask)
         attn = sent_encode[:, 0]
         # attn = self.get_mean_bert_output(attn_seq, attention_mask, True)
-        attn = self.dropout(attn)
+        # attn = self.dropout(attn)
         proj = self.sentiment_proj(attn)
         pred = F.softmax(proj, dim=-1)
         return (pred)
