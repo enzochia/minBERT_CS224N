@@ -54,7 +54,7 @@ def seed_everything(seed=11711):
 
 BERT_HIDDEN_SIZE = 768
 N_SENTIMENT_CLASSES = 5
-NUM_HIDDEN_LAYERS_SST = 1
+NUM_HIDDEN_LAYERS_SST = 8
 NUM_HIDDEN_LAYERS_STS = 1
 
 class BertCrossAttention(nn.Module):
@@ -69,6 +69,9 @@ class BertCrossAttention(nn.Module):
     self.query = nn.Linear(config.hidden_size, self.all_head_size)
     self.key = nn.Linear(config.hidden_size, self.all_head_size)
     self.value = nn.Linear(config.hidden_size, self.all_head_size)
+    nn.init.uniform_(self.query.weight, 0.9, 1)
+    nn.init.uniform_(self.key.weight, 0.9, 1)
+    nn.init.uniform_(self.value.weight, 0.9, 1)
     # This dropout is applied to normalized attention scores following the original
     # implementation of transformer. Although it is a bit unusual, we empirically
     # observe that it yields better performance.
@@ -278,7 +281,27 @@ class MultitaskBERT(nn.Module):
                         sst (4 BertLayer, no 
                              final dropout)    on vm iv  -- 03/10 pm                  
                         sst (8 BertLayer, no 
-                             final dropout)    on vm v   -- 03/10 pm            
+                             final dropout)    on vm v   -- 03/10 pm      
+                        sts (1 BertCrossAttnLayer, no 
+                             final dropout)    on vm ii  -- 03/10 pm    
+                        sts (2 BertCrossAttnLayer, no 
+                             final dropout)    on vm iii -- 03/10 pm   
+                        sst (1 BertLayer, uniform init, no 
+                             final dropout)    on vm ii  -- 03/11 pm
+                        sst (2 BertLayer, uniform init, no 
+                             final dropout)    on vm iii -- 03/11 pm    
+                        sst (4 BertLayer, uniform init, no 
+                             final dropout)    on vm iv  -- 03/11 pm
+                        sst (8 BertLayer, uniform init, no 
+                             final dropout)    on vm v   -- 03/11 pm   
+                        sst (1 BertLayer, uniform init,  
+                             final dropout)    on vm ii  -- 03/11 pm
+                        sst (2 BertLayer, uniform init,  
+                             final dropout)    on vm iii -- 03/11 pm   
+                        sst (4 BertLayer, uniform init,  
+                             final dropout)    on vm iv  -- 03/11 pm
+                        sst (8 BertLayer, uniform init,  
+                             final dropout)    on vm v   -- 03/11 pm                                
         """
         # The final BERT embedding is the hidden state of [CLS] token (the first token)
         # Here, you can start by just returning the embeddings straight from BERT.
@@ -356,7 +379,7 @@ class MultitaskBERT(nn.Module):
             sent_encode = layer_module(sent_encode, extended_attention_mask)
         attn = sent_encode[:, 0]
         # attn = self.get_mean_bert_output(attn_seq, attention_mask, True)
-        # attn = self.dropout(attn)
+        attn = self.dropout(attn)
         proj = self.sentiment_proj(attn)
         pred = F.softmax(proj, dim=-1)
         return (pred)
@@ -524,22 +547,22 @@ def train_multitask(args):
         model.train()
         train_loss = 0
         num_batches = 0
-        # for batch in tqdm(sst_train_dataloader, desc=f'train-sst-epoch-{epoch}', disable=TQDM_DISABLE):
-        #     b_ids, b_mask, b_labels = (batch['token_ids'],
-        #                                batch['attention_mask'], batch['labels'])
-        #     b_ids = b_ids.to(device)
-        #     b_mask = b_mask.to(device)
-        #     b_labels = b_labels.to(device)
-        #
-        #     optimizer.zero_grad()
-        #     logits = model.predict_sentiment(b_ids, b_mask)
-        #     loss = F.cross_entropy(logits, b_labels.view(-1), reduction='sum') / args.batch_size
-        #
-        #     loss.backward()
-        #     optimizer.step()
-        #
-        #     train_loss += loss.item()
-        #     num_batches += 1
+        for batch in tqdm(sst_train_dataloader, desc=f'train-sst-epoch-{epoch}', disable=TQDM_DISABLE):
+            b_ids, b_mask, b_labels = (batch['token_ids'],
+                                       batch['attention_mask'], batch['labels'])
+            b_ids = b_ids.to(device)
+            b_mask = b_mask.to(device)
+            b_labels = b_labels.to(device)
+
+            optimizer.zero_grad()
+            logits = model.predict_sentiment(b_ids, b_mask)
+            loss = F.cross_entropy(logits, b_labels.view(-1), reduction='sum') / args.batch_size
+
+            loss.backward()
+            optimizer.step()
+
+            train_loss += loss.item()
+            num_batches += 1
 
         # for batch in tqdm(para_train_dataloader, desc=f'train-para-epoch-{epoch}', disable=TQDM_DISABLE):
         #     b_ids_1, b_mask_1, \
@@ -562,31 +585,31 @@ def train_multitask(args):
         #     train_loss += loss.item()
         #     num_batches += 1
 
-        for batch in tqdm(sts_train_dataloader, desc=f'train-sts-epoch-{epoch}', disable=TQDM_DISABLE):
-            b_ids_1, b_mask_1, \
-            b_ids_2, b_mask_2, b_labels = (batch['token_ids_1'], batch['attention_mask_1'],
-                                           batch['token_ids_2'], batch['attention_mask_2'], batch['labels'])
-            b_ids_1, b_ids_2, b_mask_1, b_mask_2 = align_pair_sents(b_ids_1, b_ids_2, b_mask_1, b_mask_2)
-            b_ids_1 = b_ids_1.int().to(device)
-            b_mask_1 = b_mask_1.int().to(device)
-            b_ids_2 = b_ids_2.int().to(device)
-            b_mask_2 = b_mask_2.int().to(device)
-            b_labels = b_labels.int().float().to(device)
-
-            optimizer.zero_grad()
-            logits = model.predict_similarity(b_ids_1, b_mask_1, b_ids_2, b_mask_2)
-            x1 = logits.view(-1, args.batch_size)
-            x2 = b_labels.view(-1, args.batch_size)
-            # this is actually pearson correlation
-            loss = -cosSim(x1 - x1.mean(dim=1, keepdim=True),
-                           x2 - x2.mean(dim=1, keepdim=True)) / args.batch_size
-            # logits = model.predict_similarity(b_ids_1, b_mask_1, b_ids_2, b_mask_2).sigmoid() * 5.0
-            # loss = F.mse_loss(logits, b_labels.view(-1), reduction='sum') / args.batch_size
-            loss.backward()
-            optimizer.step()
-
-            train_loss += loss.item()
-            num_batches += 1
+        # for batch in tqdm(sts_train_dataloader, desc=f'train-sts-epoch-{epoch}', disable=TQDM_DISABLE):
+        #     b_ids_1, b_mask_1, \
+        #     b_ids_2, b_mask_2, b_labels = (batch['token_ids_1'], batch['attention_mask_1'],
+        #                                    batch['token_ids_2'], batch['attention_mask_2'], batch['labels'])
+        #     b_ids_1, b_ids_2, b_mask_1, b_mask_2 = align_pair_sents(b_ids_1, b_ids_2, b_mask_1, b_mask_2)
+        #     b_ids_1 = b_ids_1.int().to(device)
+        #     b_mask_1 = b_mask_1.int().to(device)
+        #     b_ids_2 = b_ids_2.int().to(device)
+        #     b_mask_2 = b_mask_2.int().to(device)
+        #     b_labels = b_labels.int().float().to(device)
+        #
+        #     optimizer.zero_grad()
+        #     logits = model.predict_similarity(b_ids_1, b_mask_1, b_ids_2, b_mask_2)
+        #     x1 = logits.view(-1, args.batch_size)
+        #     x2 = b_labels.view(-1, args.batch_size)
+        #     # this is actually pearson correlation
+        #     loss = -cosSim(x1 - x1.mean(dim=1, keepdim=True),
+        #                    x2 - x2.mean(dim=1, keepdim=True)) / args.batch_size
+        #     # logits = model.predict_similarity(b_ids_1, b_mask_1, b_ids_2, b_mask_2).sigmoid() * 5.0
+        #     # loss = F.mse_loss(logits, b_labels.view(-1), reduction='sum') / args.batch_size
+        #     loss.backward()
+        #     optimizer.step()
+        #
+        #     train_loss += loss.item()
+        #     num_batches += 1
 
         train_loss = train_loss / (num_batches)
 
