@@ -54,8 +54,11 @@ def seed_everything(seed=11711):
 
 BERT_HIDDEN_SIZE = 768
 N_SENTIMENT_CLASSES = 5
-NUM_HIDDEN_LAYERS_SST = 8
-NUM_HIDDEN_LAYERS_STS = 1
+NUM_HIDDEN_LAYERS_SST = 1
+NUM_HIDDEN_LAYERS_PARA = 1
+NUM_HIDDEN_LAYERS_STS = 4
+INIT_LOWER = 0.8
+INIT_UPPER = 1
 
 class BertCrossAttention(nn.Module):
   def __init__(self, config):
@@ -69,9 +72,9 @@ class BertCrossAttention(nn.Module):
     self.query = nn.Linear(config.hidden_size, self.all_head_size)
     self.key = nn.Linear(config.hidden_size, self.all_head_size)
     self.value = nn.Linear(config.hidden_size, self.all_head_size)
-    nn.init.uniform_(self.query.weight, 0.9, 1)
-    nn.init.uniform_(self.key.weight, 0.9, 1)
-    nn.init.uniform_(self.value.weight, 0.9, 1)
+    nn.init.uniform_(self.query.weight, INIT_LOWER, INIT_UPPER)
+    nn.init.uniform_(self.key.weight, INIT_LOWER, INIT_UPPER)
+    nn.init.uniform_(self.value.weight, INIT_LOWER, INIT_UPPER)
     # This dropout is applied to normalized attention scores following the original
     # implementation of transformer. Although it is a bit unusual, we empirically
     # observe that it yields better performance.
@@ -214,6 +217,8 @@ class MultitaskBERT(nn.Module):
         # self.self_attn = BertSelfAttention(self.bert.config)
         self.bert_layers_sst = nn.ModuleList([BertLayer(self.bert.config)
                                               for _ in range(NUM_HIDDEN_LAYERS_SST)])
+        self.bert_layers_para = nn.ModuleList([BertCrossAttnLayer(self.bert.config)
+                                               for _ in range(NUM_HIDDEN_LAYERS_PARA)])
         self.bert_layers_sts = nn.ModuleList([BertCrossAttnLayer(self.bert.config)
                                               for _ in range(NUM_HIDDEN_LAYERS_STS)])
         self.cross_attn = BertCrossAttention(self.bert.config)
@@ -246,12 +251,15 @@ class MultitaskBERT(nn.Module):
         mean of seq                             finetune            0.515                0.550         0.854        1829 + 33475 + 1715
         
         attn, no init, no dropout               pretrain            0.253 (2x attn)      0.         0.        1096 +  + 
-        mean of seq                             finetune            0.509 (2x attn)      0.         0.        2152 +  + 
-        attn, init, dropout                     pretrain            0.253 (2x attn)      0.         0.        1077 +  + 
-        mean of seq                             finetune            0.531 (2x attn)      0.         0.        2133 +  +         
+                                                finetune            0.509 (2x attn)      0.         0.        2152 +  + 
+        attn, init, dropout                     pretrain            0.253 (2x attn)      0.         0.191        1077 +  + 1039
+                                                finetune            0.531 (2x attn)      0.         0.617        2133 +  + 2018        
         attn, init, no dropout                  pretrain            0.262 (2x attn)      0.         0.        1099 +  + 
-        mean of seq                             finetune            0.539 (2x attn)      0.         0.        2161 +  +                                                     
-        
+                                                finetune            0.539 (2x attn)      0.         0.        2161 +  +        
+        attn, init, no dropout, 0.99 - 1        pretrain            0. (2x attn)      0.         0.         +  + 
+                                                finetune            0. (2x attn)      0.         0.         +  +                                                    
+        attn, init, no dropout, 20 epochs       pretrain            0.262 (2x attn)      0.         0.        2171 +  + 
+                                                finetune            0.539 (2x attn)      0.         0.        4263 +  +         
         Note: 20240307: order: sst, sts, para. on vm ii  -- 03/07 am
                         order: para, sst, sts. on vm iii -- 03/07 am
                         order: para, sts, sst. on vm iv  -- 03/07 am
@@ -307,7 +315,45 @@ class MultitaskBERT(nn.Module):
                         sst (4 BertLayer, uniform init,  
                              final dropout)    on vm iv  -- 03/11 pm
                         sst (8 BertLayer, uniform init,  
-                             final dropout)    on vm v   -- 03/11 pm                                
+                             final dropout)    on vm v   -- 03/11 pm    
+                        sts (1 BertLayer, uniform init, no 
+                             final dropout)    on vm ii  -- 03/12 pm
+                        sts (2 BertLayer, uniform init, no 
+                             final dropout)    on vm iii -- 03/12 pm    
+                        sts (4 BertLayer, uniform init, no 
+                             final dropout)    on vm iv  -- 03/12 pm
+                        sts (8 BertLayer, uniform init, no 
+                             final dropout)    on vm v   -- 03/12 pm    
+                        sst (1 BertLayer, uniform init, no 
+                             final dropout, --epoch 20)    
+                                               on vm ii  -- 03/11 pm
+                        sst (2 BertLayer, uniform init, no 
+                             final dropout, --epoch 20)      
+                                               on vm iii -- 03/11 pm    
+                        sst (4 BertLayer, uniform init, no 
+                             final dropout, --epoch 20)    
+                                               on vm iv  -- 03/11 pm
+                        sst (8 BertLayer, uniform init, no 
+                             final dropout, --epoch 20)      
+                                               on vm v   -- 03/11 pm         
+                        sts (1 BertLayer, uniform init 0.99 1, no 
+                             final dropout)    on vm ii  -- 03/12 pm
+                        sts (2 BertLayer, uniform init 0.99 1, no 
+                             final dropout)    on vm iii -- 03/12 pm    
+                        sts (4 BertLayer, uniform init 0.99 1, no 
+                             final dropout)    on vm iv  -- 03/12 pm
+                        sts (8 BertLayer, uniform init 0.99 1, no 
+                             final dropout)    on vm v   -- 03/12 pm    
+                        sts (1 BertLayer, uniform init 0.8 1, no 
+                             final dropout)    on vm ii  -- 03/12 pm
+                        sts (2 BertLayer, uniform init 0.8 1, no 
+                             final dropout)    on vm iii -- 03/12 pm    
+                        sts (4 BertLayer, uniform init 0.8 1, no 
+                             final dropout)    on vm iv  -- 03/12 pm
+                                                
+                                               
+                                               
+                                                                    
         """
         # The final BERT embedding is the hidden state of [CLS] token (the first token)
         # Here, you can start by just returning the embeddings straight from BERT.
@@ -404,16 +450,36 @@ class MultitaskBERT(nn.Module):
         # TODO: another dropout
         # TODO: small layer(s)
         # TODO: use less layers
+        # # direct project without attentions
+        # # sent_encode_1 = self.forward(input_ids_1, attention_mask_1)
+        # # sent_encode_2 = self.forward(input_ids_2, attention_mask_2)
         # sent_encode_1 = self.forward(input_ids_1, attention_mask_1)
+        # sent_encode_1 = self.get_mean_bert_output(sent_encode_1, attention_mask_1, True)
+        # sent_encode_1 = self.dropout(sent_encode_1)
         # sent_encode_2 = self.forward(input_ids_2, attention_mask_2)
+        # sent_encode_2 = self.get_mean_bert_output(sent_encode_2, attention_mask_2, True)
+        # sent_encode_2 = self.dropout(sent_encode_2)
+        # proj_1 = self.paraphrase_proj(sent_encode_1)
+        # proj_2 = self.paraphrase_proj(sent_encode_2)
+        # product = proj_1 * proj_2
+        # pred = product.sum(dim=1)
+
+        # project using attentions
+        extended_attention_mask_1: torch.Tensor = get_extended_attention_mask(attention_mask_1, self.bert.dtype)
+        extended_attention_mask_2: torch.Tensor = get_extended_attention_mask(attention_mask_2, self.bert.dtype)
         sent_encode_1 = self.forward(input_ids_1, attention_mask_1)
-        sent_encode_1 = self.get_mean_bert_output(sent_encode_1, attention_mask_1, True)
-        sent_encode_1 = self.dropout(sent_encode_1)
         sent_encode_2 = self.forward(input_ids_2, attention_mask_2)
-        sent_encode_2 = self.get_mean_bert_output(sent_encode_2, attention_mask_2, True)
-        sent_encode_2 = self.dropout(sent_encode_2)
-        proj_1 = self.paraphrase_proj(sent_encode_1)
-        proj_2 = self.paraphrase_proj(sent_encode_2)
+        # sent_encode_1 = self.dropout(sent_encode_1)
+        # sent_encode_2 = self.dropout(sent_encode_2)
+
+        for i, layer_module in enumerate(self.bert_layers_para):
+            # Feed the encoding from the last bert_layer to the next.
+            sent_encode_1, sent_encode_2 = layer_module(sent_encode_1, sent_encode_2,
+                                                        extended_attention_mask_1, extended_attention_mask_2)
+        tk_i, tk_ii = self.get_bert_cross_attn(sent_encode_1, sent_encode_2, extended_attention_mask_1,
+                                               extended_attention_mask_2, True)
+        proj_1 = self.paraphrase_proj(tk_i)
+        proj_2 = self.paraphrase_proj(tk_ii)
         product = proj_1 * proj_2
         pred = product.sum(dim=1)
         return(pred)
@@ -458,8 +524,6 @@ class MultitaskBERT(nn.Module):
                                                         extended_attention_mask_1, extended_attention_mask_2)
         tk_i, tk_ii = self.get_bert_cross_attn(sent_encode_1, sent_encode_2, extended_attention_mask_1,
                                                extended_attention_mask_2, True)
-        tk_i = self.dropout(tk_i)
-        tk_ii = self.dropout(tk_ii)
         # tk_i = self.dropout(tk_i)
         # tk_ii = self.dropout(tk_ii)
         proj_1 = self.similarity_proj(tk_i)
@@ -553,31 +617,32 @@ def train_multitask(args):
         model.train()
         train_loss = 0
         num_batches = 0
-        for batch in tqdm(sst_train_dataloader, desc=f'train-sst-epoch-{epoch}', disable=TQDM_DISABLE):
-            b_ids, b_mask, b_labels = (batch['token_ids'],
-                                       batch['attention_mask'], batch['labels'])
-            b_ids = b_ids.to(device)
-            b_mask = b_mask.to(device)
-            b_labels = b_labels.to(device)
-
-            optimizer.zero_grad()
-            logits = model.predict_sentiment(b_ids, b_mask)
-            loss = F.cross_entropy(logits, b_labels.view(-1), reduction='sum') / args.batch_size
-
-            loss.backward()
-            optimizer.step()
-
-            train_loss += loss.item()
-            num_batches += 1
+        # for batch in tqdm(sst_train_dataloader, desc=f'train-sst-epoch-{epoch}', disable=TQDM_DISABLE):
+        #     b_ids, b_mask, b_labels = (batch['token_ids'],
+        #                                batch['attention_mask'], batch['labels'])
+        #     b_ids = b_ids.to(device)
+        #     b_mask = b_mask.to(device)
+        #     b_labels = b_labels.to(device)
+        #
+        #     optimizer.zero_grad()
+        #     logits = model.predict_sentiment(b_ids, b_mask)
+        #     loss = F.cross_entropy(logits, b_labels.view(-1), reduction='sum') / args.batch_size
+        #
+        #     loss.backward()
+        #     optimizer.step()
+        #
+        #     train_loss += loss.item()
+        #     num_batches += 1
 
         # for batch in tqdm(para_train_dataloader, desc=f'train-para-epoch-{epoch}', disable=TQDM_DISABLE):
         #     b_ids_1, b_mask_1, \
         #     b_ids_2, b_mask_2, b_labels = (batch['token_ids_1'], batch['attention_mask_1'],
         #                                    batch['token_ids_2'], batch['attention_mask_2'], batch['labels'])
-        #     b_ids_1 = b_ids_1.to(device)
-        #     b_mask_1 = b_mask_1.to(device)
-        #     b_ids_2 = b_ids_2.to(device)
-        #     b_mask_2 = b_mask_2.to(device)
+        #     b_ids_1, b_ids_2, b_mask_1, b_mask_2 = align_pair_sents(b_ids_1, b_ids_2, b_mask_1, b_mask_2)
+        #     b_ids_1 = b_ids_1.int().to(device)
+        #     b_mask_1 = b_mask_1.int().to(device)
+        #     b_ids_2 = b_ids_2.int().to(device)
+        #     b_mask_2 = b_mask_2.int().to(device)
         #     b_labels = b_labels.float().to(device)
         #
         #     optimizer.zero_grad()
@@ -591,31 +656,31 @@ def train_multitask(args):
         #     train_loss += loss.item()
         #     num_batches += 1
 
-        # for batch in tqdm(sts_train_dataloader, desc=f'train-sts-epoch-{epoch}', disable=TQDM_DISABLE):
-        #     b_ids_1, b_mask_1, \
-        #     b_ids_2, b_mask_2, b_labels = (batch['token_ids_1'], batch['attention_mask_1'],
-        #                                    batch['token_ids_2'], batch['attention_mask_2'], batch['labels'])
-        #     b_ids_1, b_ids_2, b_mask_1, b_mask_2 = align_pair_sents(b_ids_1, b_ids_2, b_mask_1, b_mask_2)
-        #     b_ids_1 = b_ids_1.int().to(device)
-        #     b_mask_1 = b_mask_1.int().to(device)
-        #     b_ids_2 = b_ids_2.int().to(device)
-        #     b_mask_2 = b_mask_2.int().to(device)
-        #     b_labels = b_labels.int().float().to(device)
-        #
-        #     optimizer.zero_grad()
-        #     logits = model.predict_similarity(b_ids_1, b_mask_1, b_ids_2, b_mask_2)
-        #     x1 = logits.view(-1, args.batch_size)
-        #     x2 = b_labels.view(-1, args.batch_size)
-        #     # this is actually pearson correlation
-        #     loss = -cosSim(x1 - x1.mean(dim=1, keepdim=True),
-        #                    x2 - x2.mean(dim=1, keepdim=True)) / args.batch_size
-        #     # logits = model.predict_similarity(b_ids_1, b_mask_1, b_ids_2, b_mask_2).sigmoid() * 5.0
-        #     # loss = F.mse_loss(logits, b_labels.view(-1), reduction='sum') / args.batch_size
-        #     loss.backward()
-        #     optimizer.step()
-        #
-        #     train_loss += loss.item()
-        #     num_batches += 1
+        for batch in tqdm(sts_train_dataloader, desc=f'train-sts-epoch-{epoch}', disable=TQDM_DISABLE):
+            b_ids_1, b_mask_1, \
+            b_ids_2, b_mask_2, b_labels = (batch['token_ids_1'], batch['attention_mask_1'],
+                                           batch['token_ids_2'], batch['attention_mask_2'], batch['labels'])
+            b_ids_1, b_ids_2, b_mask_1, b_mask_2 = align_pair_sents(b_ids_1, b_ids_2, b_mask_1, b_mask_2)
+            b_ids_1 = b_ids_1.int().to(device)
+            b_mask_1 = b_mask_1.int().to(device)
+            b_ids_2 = b_ids_2.int().to(device)
+            b_mask_2 = b_mask_2.int().to(device)
+            b_labels = b_labels.int().float().to(device)
+
+            optimizer.zero_grad()
+            logits = model.predict_similarity(b_ids_1, b_mask_1, b_ids_2, b_mask_2)
+            x1 = logits.view(-1, args.batch_size)
+            x2 = b_labels.view(-1, args.batch_size)
+            # this is actually pearson correlation
+            loss = -cosSim(x1 - x1.mean(dim=1, keepdim=True),
+                           x2 - x2.mean(dim=1, keepdim=True)) / args.batch_size
+            # logits = model.predict_similarity(b_ids_1, b_mask_1, b_ids_2, b_mask_2).sigmoid() * 5.0
+            # loss = F.mse_loss(logits, b_labels.view(-1), reduction='sum') / args.batch_size
+            loss.backward()
+            optimizer.step()
+
+            train_loss += loss.item()
+            num_batches += 1
 
         train_loss = train_loss / (num_batches)
 

@@ -97,11 +97,12 @@ def model_eval_multitask(sentiment_dataloader,
              b_labels, b_sent_ids) = (batch['token_ids_1'], batch['attention_mask_1'],
                           batch['token_ids_2'], batch['attention_mask_2'],
                           batch['labels'], batch['sent_ids'])
-
-            b_ids1 = b_ids1.to(device)
-            b_mask1 = b_mask1.to(device)
-            b_ids2 = b_ids2.to(device)
-            b_mask2 = b_mask2.to(device)
+            if cross_attn:
+                b_ids1, b_ids2, b_mask1, b_mask2 = align_pair_sents(b_ids1, b_ids2, b_mask1, b_mask2)
+            b_ids1 = b_ids1.int().to(device)
+            b_mask1 = b_mask1.int().to(device)
+            b_ids2 = b_ids2.int().to(device)
+            b_mask2 = b_mask2.int().to(device)
 
             logits = model.predict_paraphrase(b_ids1, b_mask1, b_ids2, b_mask2)
             y_hat = logits.sigmoid().round().flatten().cpu().numpy()
@@ -182,11 +183,12 @@ def model_eval_test_multitask(sentiment_dataloader,
              b_sent_ids) = (batch['token_ids_1'], batch['attention_mask_1'],
                           batch['token_ids_2'], batch['attention_mask_2'],
                           batch['sent_ids'])
-
-            b_ids1 = b_ids1.to(device)
-            b_mask1 = b_mask1.to(device)
-            b_ids2 = b_ids2.to(device)
-            b_mask2 = b_mask2.to(device)
+            if cross_attn:
+                b_ids1, b_ids2, b_mask1, b_mask2 = align_pair_sents(b_ids1, b_ids2, b_mask1, b_mask2)
+            b_ids1 = b_ids1.int().to(device)
+            b_mask1 = b_mask1.int().to(device)
+            b_ids2 = b_ids2.int().to(device)
+            b_mask2 = b_mask2.int().to(device)
 
             logits = model.predict_paraphrase(b_ids1, b_mask1, b_ids2, b_mask2)
             y_hat = logits.sigmoid().round().flatten().cpu().numpy()
