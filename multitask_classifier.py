@@ -63,6 +63,7 @@ INIT_UPPER = 1
 TRAIN_SST = False
 TRAIN_PARA = False
 TRAIN_STS = True
+DROPOUT = False
 class BertCrossAttention(nn.Module):
   def __init__(self, config):
     super().__init__()
@@ -485,9 +486,9 @@ class MultitaskBERT(nn.Module):
         extended_attention_mask_2: torch.Tensor = get_extended_attention_mask(attention_mask_2, self.bert.dtype)
         sent_encode_1 = self.forward(input_ids_1, attention_mask_1)
         sent_encode_2 = self.forward(input_ids_2, attention_mask_2)
-        # sent_encode_1 = self.dropout(sent_encode_1)
-        # sent_encode_2 = self.dropout(sent_encode_2)
-
+        if DROPOUT:
+            sent_encode_1 = self.dropout(sent_encode_1)
+            sent_encode_2 = self.dropout(sent_encode_2)
         for i, layer_module in enumerate(self.bert_layers_para):
             # Feed the encoding from the last bert_layer to the next.
             sent_encode_1, sent_encode_2 = layer_module(sent_encode_1, sent_encode_2,
@@ -531,8 +532,9 @@ class MultitaskBERT(nn.Module):
         extended_attention_mask_2: torch.Tensor = get_extended_attention_mask(attention_mask_2, self.bert.dtype)
         sent_encode_1 = self.forward(input_ids_1, attention_mask_1)
         sent_encode_2 = self.forward(input_ids_2, attention_mask_2)
-        # sent_encode_1 = self.dropout(sent_encode_1)
-        # sent_encode_2 = self.dropout(sent_encode_2)
+        if DROPOUT:
+            sent_encode_1 = self.dropout(sent_encode_1)
+            sent_encode_2 = self.dropout(sent_encode_2)
 
         for i, layer_module in enumerate(self.bert_layers_sts):
             # Feed the encoding from the last bert_layer to the next.
