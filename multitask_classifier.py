@@ -56,14 +56,14 @@ BERT_HIDDEN_SIZE = 768
 N_SENTIMENT_CLASSES = 5
 NUM_HIDDEN_LAYERS_SST = 1
 NUM_HIDDEN_LAYERS_PARA = 0
-NUM_HIDDEN_LAYERS_STS = 0
-INIT = True
+NUM_HIDDEN_LAYERS_STS = 1
+INIT = False
 INIT_LOWER = 0.9
 INIT_UPPER = 1
-TRAIN_SST = True
+TRAIN_SST = False
 TRAIN_PARA = False
-TRAIN_STS = False
-DROPOUT = False
+TRAIN_STS = True
+DROPOUT = True
 WRITE_LOG = True
 class BertCrossAttention(nn.Module):
   def __init__(self, config):
@@ -257,12 +257,12 @@ class MultitaskBERT(nn.Module):
         task specific finetune                  pretrain            0.460                0.386         0.643        819 + 13952 + 837
         mean of seq                             finetune            0.515                0.561         0.854        1829 + 34617 + 1715
         
-        attn, no init, no dropout               pretrain            0.253 (2x attn)      0.         0.        1096 +  + 
-                                                finetune            0.509 (2x attn)      0.         0.        2152 +  + 
+        attn, no init, no dropout               pretrain            0.253 (2x attn)      0.469 (1x a)  0.342 (1x a) 1096 + 15827 + 918 
+                                                finetune            0.509 (2x attn)      0.843 (1x a)  0.817 (1x a) 2152 + 37570 + 1844 
         attn, init, dropout                     pretrain            0.253 (2x attn)      0.         0.191        1077 +  + 1039
                                                 finetune            0.531 (2x attn)      0.         0.617        2133 +  + 2018        
-        attn, init, no dropout                  pretrain            0.262 (2x attn)      0.         0.        1099 +  + 
-                                                finetune            0.539 (2x attn)      0.         0.        2161 +  +        
+        attn, init, no dropout                  pretrain            0.262 (2x attn)      0.429 (1x a)  0.        1099 + 15411 + 
+                                                finetune            0.539 (2x attn)      0.838 (1x a)  0.        2161 + 36781 +        
         attn, init, no dropout, 0.99 - 1        pretrain            0. (2x attn)      0.         0.         +  + 
                                                 finetune            0. (2x attn)      0.         0.         +  +                                                    
         attn, init, no dropout, 20 epochs       pretrain            0.262 (2x attn)      0.         0.        2171 +  + 
@@ -374,7 +374,12 @@ class MultitaskBERT(nn.Module):
                         para (0 BertLayer, no init,  
                              final dropout)    on vm ii  -- 03/14 am
                         para (0 BertLayer, uniform init 0.9 1,  
-                             final dropout)    on vm iii -- 03/14 am                                                                          
+                             final dropout)    on vm iii -- 03/14 am    
+                        sts (0 BertLayer, no init,  
+                             final dropout)    on vm ii  -- 03/13 pm                                                                          
+                        sts (1 BertLayer, no init,  
+                             final dropout)    on vm iii -- 03/13 pm                                                                          
+
         """
         # The final BERT embedding is the hidden state of [CLS] token (the first token)
         # Here, you can start by just returning the embeddings straight from BERT.
