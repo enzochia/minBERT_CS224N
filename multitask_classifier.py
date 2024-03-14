@@ -54,15 +54,15 @@ def seed_everything(seed=11711):
 
 BERT_HIDDEN_SIZE = 768
 N_SENTIMENT_CLASSES = 5
-NUM_HIDDEN_LAYERS_SST = 1
+NUM_HIDDEN_LAYERS_SST = 2
 NUM_HIDDEN_LAYERS_PARA = 0
-NUM_HIDDEN_LAYERS_STS = 1
-INIT = False
+NUM_HIDDEN_LAYERS_STS = 0
+INIT = True
 INIT_LOWER = 0.9
 INIT_UPPER = 1
-TRAIN_SST = False
+TRAIN_SST = True
 TRAIN_PARA = False
-TRAIN_STS = True
+TRAIN_STS = False
 DROPOUT = True
 WRITE_LOG = True
 class BertCrossAttention(nn.Module):
@@ -256,13 +256,15 @@ class MultitaskBERT(nn.Module):
         first token                             finetune            0.504                0.595         0.587        1886 + 33475 + 1822
         task specific finetune                  pretrain            0.460                0.386         0.643        819 + 13952 + 837
         mean of seq                             finetune            0.515                0.561         0.854        1829 + 34617 + 1715
-        
-        attn, no init, no dropout               pretrain            0.253 (2x attn)      0.469 (1x a)  0.342 (1x a) 1096 + 15827 + 918 
-                                                finetune            0.509 (2x attn)      0.843 (1x a)  0.817 (1x a) 2152 + 37570 + 1844 
-        attn, init, dropout                     pretrain            0.253 (2x attn)      0.         0.191        1077 +  + 1039
-                                                finetune            0.531 (2x attn)      0.         0.617        2133 +  + 2018        
-        attn, init, no dropout                  pretrain            0.262 (2x attn)      0.429 (1x a)  0.        1099 + 15411 + 
-                                                finetune            0.539 (2x attn)      0.838 (1x a)  0.        2161 + 36781 +        
+
+        attn, no init,    dropout               pretrain            0.      0.      0.347 (1x a)  +  + 960
+                                                finetune            0.      0.      0.817 (1x a)  +  + 1863          
+        attn, no init, no dropout               pretrain            0.253 (2x attn)      0.469 (1x a)  0.251 (3x a) 1096 + 15827 + 1163 
+                                                finetune            0.509 (2x attn)      0.843 (1x a)  0.822 (3x a) 2152 + 37570 + 2105 
+        attn, init, dropout                     pretrain            0.253 (2x attn)      0.         0.191 (2x a)    1077 +  + 1039
+                                                finetune            0.531 (2x attn)      0.         0.617 (2x a)    2133 +  + 2018        
+        attn, init, no dropout                  pretrain            0.262 (2x attn)      0.429 (1x a)  0.109 (5x a) 1099 + 15411 + 1371 
+                                                finetune            0.539 (2x attn)      0.838 (1x a)  0.404 (5x a) 2161 + 36781 + 2338        
         attn, init, no dropout, 0.99 - 1        pretrain            0. (2x attn)      0.         0.         +  + 
                                                 finetune            0. (2x attn)      0.         0.         +  +                                                    
         attn, init, no dropout, 20 epochs       pretrain            0.262 (2x attn)      0.         0.        2171 +  + 
@@ -376,10 +378,24 @@ class MultitaskBERT(nn.Module):
                         para (0 BertLayer, uniform init 0.9 1,  
                              final dropout)    on vm iii -- 03/14 am    
                         sts (0 BertLayer, no init,  
-                             final dropout)    on vm ii  -- 03/13 pm                                                                          
-                        sts (1 BertLayer, no init,  
-                             final dropout)    on vm iii -- 03/13 pm                                                                          
-
+                             final dropout)    on vm iv  -- 03/14 am                                                                          
+                        sts (4 BertLayer, no init,  
+                             final dropout)    on vm v   -- 03/14 am                                                                          
+                        sts (8 BertLayer, no init,  
+                             final dropout)    on vm iv  -- 03/14 am         
+                        sts (1 BertLayer, no init, no
+                             final dropout)    on vm iv  -- 03/14 am                                                                          
+                        sts (2 BertLayer, no init, no
+                             final dropout)    on vm v   -- 03/14 am      
+                        sts (4 BertLayer, no init, no
+                             final dropout)    on vm iv  -- 03/14 pm                                                                          
+                        sts (6 BertLayer, no init, no
+                             final dropout)    on vm v   -- 03/14 pm          
+                        sst (2 BertLayer, uniform init 0.75 1, no 
+                             final dropout)    on vm iv  -- 03/14 pm   
+                        sst (2 BertLayer, uniform init 0.85 1, no 
+                             final dropout)    on vm v   -- 03/14 pm                                                          
+                                                    
         """
         # The final BERT embedding is the hidden state of [CLS] token (the first token)
         # Here, you can start by just returning the embeddings straight from BERT.
