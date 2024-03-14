@@ -55,11 +55,14 @@ def seed_everything(seed=11711):
 BERT_HIDDEN_SIZE = 768
 N_SENTIMENT_CLASSES = 5
 NUM_HIDDEN_LAYERS_SST = 1
-NUM_HIDDEN_LAYERS_PARA = 1
-NUM_HIDDEN_LAYERS_STS = 4
-INIT_LOWER = 0.8
+NUM_HIDDEN_LAYERS_PARA = 0
+NUM_HIDDEN_LAYERS_STS = 0
+INIT = False
+INIT_LOWER = 0.5
 INIT_UPPER = 1
-
+TRAIN_SST = False
+TRAIN_PARA = False
+TRAIN_STS = True
 class BertCrossAttention(nn.Module):
   def __init__(self, config):
     super().__init__()
@@ -72,9 +75,10 @@ class BertCrossAttention(nn.Module):
     self.query = nn.Linear(config.hidden_size, self.all_head_size)
     self.key = nn.Linear(config.hidden_size, self.all_head_size)
     self.value = nn.Linear(config.hidden_size, self.all_head_size)
-    nn.init.uniform_(self.query.weight, INIT_LOWER, INIT_UPPER)
-    nn.init.uniform_(self.key.weight, INIT_LOWER, INIT_UPPER)
-    nn.init.uniform_(self.value.weight, INIT_LOWER, INIT_UPPER)
+    if INIT:
+        nn.init.uniform_(self.query.weight, INIT_LOWER, INIT_UPPER)
+        nn.init.uniform_(self.key.weight, INIT_LOWER, INIT_UPPER)
+        nn.init.uniform_(self.value.weight, INIT_LOWER, INIT_UPPER)
     # This dropout is applied to normalized attention scores following the original
     # implementation of transformer. Although it is a bit unusual, we empirically
     # observe that it yields better performance.
@@ -222,6 +226,7 @@ class MultitaskBERT(nn.Module):
         self.bert_layers_sts = nn.ModuleList([BertCrossAttnLayer(self.bert.config)
                                               for _ in range(NUM_HIDDEN_LAYERS_STS)])
         self.cross_attn = BertCrossAttention(self.bert.config)
+        # nn.init.uniform_(self.cross_attn.weight, INIT_LOWER, INIT_UPPER)
         # self.agg_proj = nn.Linear(self.seq_length, 1)
         # ### TODO
         # raise NotImplementedError
@@ -247,8 +252,8 @@ class MultitaskBERT(nn.Module):
                                                 finetune            0.369                0.407         0.193        35927
         task specific finetune                  pretrain            0.389                0.401         0.298        868 + 13274 + 864
         first token                             finetune            0.504                0.595         0.587        1886 + 33475 + 1822
-        task specific finetune                  pretrain            0.460                0.388         0.643        819 + 13259 + 837
-        mean of seq                             finetune            0.515                0.550         0.854        1829 + 33475 + 1715
+        task specific finetune                  pretrain            0.460                0.386         0.643        819 + 13952 + 837
+        mean of seq                             finetune            0.515                0.561         0.854        1829 + 34617 + 1715
         
         attn, no init, no dropout               pretrain            0.253 (2x attn)      0.         0.        1096 +  + 
                                                 finetune            0.509 (2x attn)      0.         0.        2152 +  + 
@@ -344,15 +349,26 @@ class MultitaskBERT(nn.Module):
                              final dropout)    on vm iv  -- 03/12 pm
                         sts (8 BertLayer, uniform init 0.99 1, no 
                              final dropout)    on vm v   -- 03/12 pm    
-                        sts (1 BertLayer, uniform init 0.8 1, no 
+                        # sts (1 BertLayer, uniform init 0.8 1, no 
+                        #      final dropout)    on vm ii  -- 03/12 pm 0.781
+                        # sts (2 BertLayer, uniform init 0.8 1, no 
+                        #      final dropout)    on vm iii -- 03/12 pm 0.742
+                        # sts (4 BertLayer, uniform init 0.8 1, no 
+                        #      final dropout)    on vm iv  -- 03/12 pm
+                        para (1 BertLayer, uniform init 0.9 1, no 
                              final dropout)    on vm ii  -- 03/12 pm
-                        sts (2 BertLayer, uniform init 0.8 1, no 
+                        para (2 BertLayer, uniform init 0.9 1, no 
                              final dropout)    on vm iii -- 03/12 pm    
-                        sts (4 BertLayer, uniform init 0.8 1, no 
+                        para (4 BertLayer, uniform init 0.9 1, no 
                              final dropout)    on vm iv  -- 03/12 pm
-                                                
-                                               
-                                               
+                        para (8 BertLayer, uniform init 0.9 1, no 
+                             final dropout)    on vm v   -- 03/12 pm                                                   
+                        para (0 BertLayer, no init, no 
+                             final dropout)    on vm ii  -- 03/13 pm
+                        para (0 BertLayer, uniform init 0.9 1, no 
+                             final dropout)    on vm iii -- 03/13 pm                                                  
+                        sts (0 BertLayer, no init, no 
+                             final dropout)    on vm iv  -- 03/13 pm                                               
                                                                     
         """
         # The final BERT embedding is the hidden state of [CLS] token (the first token)
@@ -617,70 +633,71 @@ def train_multitask(args):
         model.train()
         train_loss = 0
         num_batches = 0
-        # for batch in tqdm(sst_train_dataloader, desc=f'train-sst-epoch-{epoch}', disable=TQDM_DISABLE):
-        #     b_ids, b_mask, b_labels = (batch['token_ids'],
-        #                                batch['attention_mask'], batch['labels'])
-        #     b_ids = b_ids.to(device)
-        #     b_mask = b_mask.to(device)
-        #     b_labels = b_labels.to(device)
-        #
-        #     optimizer.zero_grad()
-        #     logits = model.predict_sentiment(b_ids, b_mask)
-        #     loss = F.cross_entropy(logits, b_labels.view(-1), reduction='sum') / args.batch_size
-        #
-        #     loss.backward()
-        #     optimizer.step()
-        #
-        #     train_loss += loss.item()
-        #     num_batches += 1
+        if TRAIN_SST:
+            for batch in tqdm(sst_train_dataloader, desc=f'train-sst-epoch-{epoch}', disable=TQDM_DISABLE):
+                b_ids, b_mask, b_labels = (batch['token_ids'],
+                                           batch['attention_mask'], batch['labels'])
+                b_ids = b_ids.to(device)
+                b_mask = b_mask.to(device)
+                b_labels = b_labels.to(device)
 
-        # for batch in tqdm(para_train_dataloader, desc=f'train-para-epoch-{epoch}', disable=TQDM_DISABLE):
-        #     b_ids_1, b_mask_1, \
-        #     b_ids_2, b_mask_2, b_labels = (batch['token_ids_1'], batch['attention_mask_1'],
-        #                                    batch['token_ids_2'], batch['attention_mask_2'], batch['labels'])
-        #     b_ids_1, b_ids_2, b_mask_1, b_mask_2 = align_pair_sents(b_ids_1, b_ids_2, b_mask_1, b_mask_2)
-        #     b_ids_1 = b_ids_1.int().to(device)
-        #     b_mask_1 = b_mask_1.int().to(device)
-        #     b_ids_2 = b_ids_2.int().to(device)
-        #     b_mask_2 = b_mask_2.int().to(device)
-        #     b_labels = b_labels.float().to(device)
-        #
-        #     optimizer.zero_grad()
-        #     logits = model.predict_paraphrase(b_ids_1, b_mask_1, b_ids_2, b_mask_2)
-        #     loss = F.binary_cross_entropy_with_logits(logits, b_labels.view(-1), reduction='sum') / args.batch_size
-        #     # y_hat = logits.sigmoid().round()
-        #     # loss = -torch.eq(y_hat, b_labels).float().mean()
-        #     loss.backward()
-        #     optimizer.step()
-        #
-        #     train_loss += loss.item()
-        #     num_batches += 1
+                optimizer.zero_grad()
+                logits = model.predict_sentiment(b_ids, b_mask)
+                loss = F.cross_entropy(logits, b_labels.view(-1), reduction='sum') / args.batch_size
 
-        for batch in tqdm(sts_train_dataloader, desc=f'train-sts-epoch-{epoch}', disable=TQDM_DISABLE):
-            b_ids_1, b_mask_1, \
-            b_ids_2, b_mask_2, b_labels = (batch['token_ids_1'], batch['attention_mask_1'],
-                                           batch['token_ids_2'], batch['attention_mask_2'], batch['labels'])
-            b_ids_1, b_ids_2, b_mask_1, b_mask_2 = align_pair_sents(b_ids_1, b_ids_2, b_mask_1, b_mask_2)
-            b_ids_1 = b_ids_1.int().to(device)
-            b_mask_1 = b_mask_1.int().to(device)
-            b_ids_2 = b_ids_2.int().to(device)
-            b_mask_2 = b_mask_2.int().to(device)
-            b_labels = b_labels.int().float().to(device)
+                loss.backward()
+                optimizer.step()
 
-            optimizer.zero_grad()
-            logits = model.predict_similarity(b_ids_1, b_mask_1, b_ids_2, b_mask_2)
-            x1 = logits.view(-1, args.batch_size)
-            x2 = b_labels.view(-1, args.batch_size)
-            # this is actually pearson correlation
-            loss = -cosSim(x1 - x1.mean(dim=1, keepdim=True),
-                           x2 - x2.mean(dim=1, keepdim=True)) / args.batch_size
-            # logits = model.predict_similarity(b_ids_1, b_mask_1, b_ids_2, b_mask_2).sigmoid() * 5.0
-            # loss = F.mse_loss(logits, b_labels.view(-1), reduction='sum') / args.batch_size
-            loss.backward()
-            optimizer.step()
+                train_loss += loss.item()
+                num_batches += 1
+        if TRAIN_PARA:
+            for batch in tqdm(para_train_dataloader, desc=f'train-para-epoch-{epoch}', disable=TQDM_DISABLE):
+                b_ids_1, b_mask_1, \
+                b_ids_2, b_mask_2, b_labels = (batch['token_ids_1'], batch['attention_mask_1'],
+                                               batch['token_ids_2'], batch['attention_mask_2'], batch['labels'])
+                b_ids_1, b_ids_2, b_mask_1, b_mask_2 = align_pair_sents(b_ids_1, b_ids_2, b_mask_1, b_mask_2)
+                b_ids_1 = b_ids_1.int().to(device)
+                b_mask_1 = b_mask_1.int().to(device)
+                b_ids_2 = b_ids_2.int().to(device)
+                b_mask_2 = b_mask_2.int().to(device)
+                b_labels = b_labels.float().to(device)
 
-            train_loss += loss.item()
-            num_batches += 1
+                optimizer.zero_grad()
+                logits = model.predict_paraphrase(b_ids_1, b_mask_1, b_ids_2, b_mask_2)
+                loss = F.binary_cross_entropy_with_logits(logits, b_labels.view(-1), reduction='sum') / args.batch_size
+                # y_hat = logits.sigmoid().round()
+                # loss = -torch.eq(y_hat, b_labels).float().mean()
+                loss.backward()
+                optimizer.step()
+
+                train_loss += loss.item()
+                num_batches += 1
+        if TRAIN_STS:
+            for batch in tqdm(sts_train_dataloader, desc=f'train-sts-epoch-{epoch}', disable=TQDM_DISABLE):
+                b_ids_1, b_mask_1, \
+                b_ids_2, b_mask_2, b_labels = (batch['token_ids_1'], batch['attention_mask_1'],
+                                               batch['token_ids_2'], batch['attention_mask_2'], batch['labels'])
+                b_ids_1, b_ids_2, b_mask_1, b_mask_2 = align_pair_sents(b_ids_1, b_ids_2, b_mask_1, b_mask_2)
+                b_ids_1 = b_ids_1.int().to(device)
+                b_mask_1 = b_mask_1.int().to(device)
+                b_ids_2 = b_ids_2.int().to(device)
+                b_mask_2 = b_mask_2.int().to(device)
+                b_labels = b_labels.int().float().to(device)
+
+                optimizer.zero_grad()
+                logits = model.predict_similarity(b_ids_1, b_mask_1, b_ids_2, b_mask_2)
+                x1 = logits.view(-1, args.batch_size)
+                x2 = b_labels.view(-1, args.batch_size)
+                # this is actually pearson correlation
+                loss = -cosSim(x1 - x1.mean(dim=1, keepdim=True),
+                               x2 - x2.mean(dim=1, keepdim=True)) / args.batch_size
+                # logits = model.predict_similarity(b_ids_1, b_mask_1, b_ids_2, b_mask_2).sigmoid() * 5.0
+                # loss = F.mse_loss(logits, b_labels.view(-1), reduction='sum') / args.batch_size
+                loss.backward()
+                optimizer.step()
+
+                train_loss += loss.item()
+                num_batches += 1
 
         train_loss = train_loss / (num_batches)
 
