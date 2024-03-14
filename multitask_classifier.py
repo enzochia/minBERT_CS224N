@@ -57,12 +57,12 @@ N_SENTIMENT_CLASSES = 5
 NUM_HIDDEN_LAYERS_SST = 1
 NUM_HIDDEN_LAYERS_PARA = 0
 NUM_HIDDEN_LAYERS_STS = 0
-INIT = False
-INIT_LOWER = 0.5
+INIT = True
+INIT_LOWER = 0.9
 INIT_UPPER = 1
-TRAIN_SST = False
+TRAIN_SST = True
 TRAIN_PARA = False
-TRAIN_STS = True
+TRAIN_STS = False
 DROPOUT = False
 class BertCrossAttention(nn.Module):
   def __init__(self, config):
@@ -370,7 +370,10 @@ class MultitaskBERT(nn.Module):
                              final dropout)    on vm iii -- 03/13 pm                                                  
                         sts (0 BertLayer, no init, no 
                              final dropout)    on vm iv  -- 03/13 pm                                               
-                                                                    
+                        para (0 BertLayer, no init,  
+                             final dropout)    on vm ii  -- 03/14 am
+                        para (0 BertLayer, uniform init 0.9 1,  
+                             final dropout)    on vm iii -- 03/14 am                                                                          
         """
         # The final BERT embedding is the hidden state of [CLS] token (the first token)
         # Here, you can start by just returning the embeddings straight from BERT.
@@ -448,7 +451,8 @@ class MultitaskBERT(nn.Module):
             sent_encode = layer_module(sent_encode, extended_attention_mask)
         attn = sent_encode[:, 0]
         # attn = self.get_mean_bert_output(attn_seq, attention_mask, True)
-        # attn = self.dropout(attn)
+        if DROPOUT:
+            attn = self.dropout(attn)
         proj = self.sentiment_proj(attn)
         pred = F.softmax(proj, dim=-1)
         return (pred)
@@ -486,15 +490,18 @@ class MultitaskBERT(nn.Module):
         extended_attention_mask_2: torch.Tensor = get_extended_attention_mask(attention_mask_2, self.bert.dtype)
         sent_encode_1 = self.forward(input_ids_1, attention_mask_1)
         sent_encode_2 = self.forward(input_ids_2, attention_mask_2)
-        if DROPOUT:
-            sent_encode_1 = self.dropout(sent_encode_1)
-            sent_encode_2 = self.dropout(sent_encode_2)
+        # if DROPOUT:
+        #     sent_encode_1 = self.dropout(sent_encode_1)
+        #     sent_encode_2 = self.dropout(sent_encode_2)
         for i, layer_module in enumerate(self.bert_layers_para):
             # Feed the encoding from the last bert_layer to the next.
             sent_encode_1, sent_encode_2 = layer_module(sent_encode_1, sent_encode_2,
                                                         extended_attention_mask_1, extended_attention_mask_2)
         tk_i, tk_ii = self.get_bert_cross_attn(sent_encode_1, sent_encode_2, extended_attention_mask_1,
                                                extended_attention_mask_2, True)
+        if DROPOUT:
+            tk_i = self.dropout(tk_i)
+            tk_ii = self.dropout(tk_ii)
         proj_1 = self.paraphrase_proj(tk_i)
         proj_2 = self.paraphrase_proj(tk_ii)
         product = proj_1 * proj_2
@@ -532,9 +539,9 @@ class MultitaskBERT(nn.Module):
         extended_attention_mask_2: torch.Tensor = get_extended_attention_mask(attention_mask_2, self.bert.dtype)
         sent_encode_1 = self.forward(input_ids_1, attention_mask_1)
         sent_encode_2 = self.forward(input_ids_2, attention_mask_2)
-        if DROPOUT:
-            sent_encode_1 = self.dropout(sent_encode_1)
-            sent_encode_2 = self.dropout(sent_encode_2)
+        # if DROPOUT:
+        #     sent_encode_1 = self.dropout(sent_encode_1)
+        #     sent_encode_2 = self.dropout(sent_encode_2)
 
         for i, layer_module in enumerate(self.bert_layers_sts):
             # Feed the encoding from the last bert_layer to the next.
@@ -542,8 +549,9 @@ class MultitaskBERT(nn.Module):
                                                         extended_attention_mask_1, extended_attention_mask_2)
         tk_i, tk_ii = self.get_bert_cross_attn(sent_encode_1, sent_encode_2, extended_attention_mask_1,
                                                extended_attention_mask_2, True)
-        # tk_i = self.dropout(tk_i)
-        # tk_ii = self.dropout(tk_ii)
+        if DROPOUT:
+            tk_i = self.dropout(tk_i)
+            tk_ii = self.dropout(tk_ii)
         proj_1 = self.similarity_proj(tk_i)
         proj_2 = self.similarity_proj(tk_ii)
         product = proj_1 * proj_2
