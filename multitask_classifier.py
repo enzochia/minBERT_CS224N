@@ -60,10 +60,10 @@ NUM_HIDDEN_LAYERS_STS = 0
 INIT = True
 INIT_LOWER = 0.9
 INIT_UPPER = 1
-TRAIN_SST = True
+TRAIN_SST = False
 TRAIN_PARA = False
-TRAIN_STS = False
-DROPOUT = True
+TRAIN_STS = True
+DROPOUT = False
 WRITE_LOG = True
 class BertCrossAttention(nn.Module):
   def __init__(self, config):
@@ -394,7 +394,9 @@ class MultitaskBERT(nn.Module):
                         sst (2 BertLayer, uniform init 0.75 1, no 
                              final dropout)    on vm iv  -- 03/14 pm   
                         sst (2 BertLayer, uniform init 0.85 1, no 
-                             final dropout)    on vm v   -- 03/14 pm                                                          
+                             final dropout)    on vm v   -- 03/14 pm      
+                        sts (0 BertLayer, uniform init 0.9 1, 
+                             final dropout)    on vm iv  -- 03/14 pm                                                          
                                                     
         """
         # The final BERT embedding is the hidden state of [CLS] token (the first token)
