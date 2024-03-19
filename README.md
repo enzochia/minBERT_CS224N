@@ -1,4 +1,4 @@
-# CS 224N Default Final Project 2024 - Multitask BERT
+# CS 224N Final Project 2024 - Multitask BERT
 [link to project poster](Task_specific_attention.pdf)
 
 [link to project report](CS224N_Final_Project_Report.pdf)
